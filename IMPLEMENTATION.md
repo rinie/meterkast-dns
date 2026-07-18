@@ -41,25 +41,32 @@ src/
       suffix-from-counter.js
       suggest-name.js       # composes the three above
     playlist/
-      read-playlist.js       # TOML -> records
-      write-playlist.js      # records -> TOML
-      watch-playlist.js      # fs.watch wrapper
+      read-playlist.js         # TOML -> records
+      write-playlist.js        # records -> TOML, atomic write + backup
+      backup-existing-file.js  # copies path -> path.bak before an overwrite
+      watch-playlist.js        # fs.watch wrapper
+    secrets/
+      resolve-secret-env.js    # env var name -> its value, or a clear error
     server/
-      create-server.js       # routes to the three handlers below
-      handle-list.js         # GET /devices
-      handle-get.js           # GET /devices/:name
-      handle-subscribe.js     # GET /events (SSE)
+      create-server.js         # routes to the three handlers below
+      handle-list.js           # GET /devices
+      handle-get.js             # GET /devices/:name
+      handle-subscribe.js       # GET /events (SSE)
   adapters/
-    load-adapters.js          # dynamic import() loader
-    static-adapter.js         # example/test adapter, no hardware
+    load-adapters.js            # dynamic import() loader
+    static-adapter.js           # example/test adapter, no hardware
 bin/
-  meterkastd.js                # entrypoint: loads the playlist, starts the server
+  meterkastd.js                  # entrypoint: loads the playlist, starts the server
 test/
   registry.test.js
   naming.test.js
   playlist.test.js
-  run-all.js                   # see "Testing" below
-device-playlist.toml           # the actual Use-editable data file
+  secrets.test.js
+  run-all.js                     # see "Testing" below
+device-playlist.example.toml     # fixture/template, committed
+device-playlist.toml             # the real Use-editable data file, gitignored
+device-playlist.toml.bak         # last-known-good, written automatically, gitignored
+.env                             # real secret values, gitignored, never committed
 ```
 
 ## Library choices, kept minimal on purpose
@@ -70,6 +77,19 @@ device-playlist.toml           # the actual Use-editable data file
 - **Watching the hand-edited file** — native `fs.promises.watch()`, no
   `chokidar`. Its cross-platform quirks (inotify vs FSEvents vs Windows) are
   real; not a concern for the current single-file, single-host use case.
+- **Safe writes to the playlist** — `writePlaylist` writes to a temp file
+  and renames it into place (a crash mid-write can't leave a truncated
+  file), and keeps one rotated `.bak` of the previous version before
+  overwriting. This is last-known-good, deliberately independent of git: it
+  protects a bad hand-edit or a buggy adapter write without needing a commit
+  to exist first. The same pattern the series already names in
+  [It Is Always DNS](https://rinie.github.io/2026/07/26/it-is-always-dns-version-chain/),
+  applied one layer down.
+- **Secrets via `.env`, never in the playlist** — a field like
+  `mqtt-broker.password_env = "MQTT_BROKER_PASSWORD"` names an environment
+  variable; `resolveSecretEnv(name)` reads it and throws a clear error if
+  it's unset. The real value lives in a gitignored `.env` file, loaded with
+  `node --env-file=.env` — native to Node since 20.6, no `dotenv` dependency.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -104,10 +124,12 @@ device-playlist.toml           # the actual Use-editable data file
 
 ## What's actually implemented here
 
-The **core** — registry, naming suggestions, playlist read/write, and the
-HTTP query/subscribe API — is real and covered by tests. `bin/meterkastd.js`
-loads `device-playlist.toml`, serves `GET /devices`, `GET /devices/:name`,
-and `GET /events` (SSE).
+The **core** — registry, naming suggestions, safe playlist read/write,
+secret resolution, and the HTTP query/subscribe API — is real and covered
+by tests. `bin/meterkastd.js` loads `device-playlist.toml` (not the
+`.example.toml` fixture — see "Secrets never go in the playlist" in
+README.md), serves `GET /devices`, `GET /devices/:name`, and `GET /events`
+(SSE), and warns rather than crashing if no playlist file exists yet.
 
 **Adapters beyond `static-adapter.js` are out of scope for this draft.** Real
 BLE (BlueZ), USB (`udev`), Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and
@@ -134,8 +156,9 @@ accordingly.
 ```sh
 npm install
 npm test
-node bin/meterkastd.js        # PORT=8420 by default
-curl http://localhost:8420/devices
+cp device-playlist.example.toml device-playlist.toml   # your real, gitignored copy
+node --env-file=.env bin/meterkastd.js   # --env-file is optional if you have no secrets yet
+curl http://localhost:8420/devices                     # PORT=8420 by default
 curl http://localhost:8420/devices/myHpPrinter
-curl -N http://localhost:8420/events   # streams SSE change events
+curl -N http://localhost:8420/events                    # streams SSE change events
 ```

@@ -1,1 +1,6 @@
 node_modules/
+
+# Real data, not the fixture: never commit your actual playlist or secrets.
+device-playlist.toml
+device-playlist.toml.bak
+.env
