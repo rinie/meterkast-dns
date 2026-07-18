@@ -2,6 +2,7 @@
 import { createRegistry } from "../src/core/registry/create-registry.js";
 import { upsertRecord } from "../src/core/registry/upsert-record.js";
 import { readPlaylist } from "../src/core/playlist/read-playlist.js";
+import { flattenDeviceReadings } from "../src/core/playlist/flatten-device-readings.js";
 import { createServer } from "../src/core/server/create-server.js";
 
 const playlistPath =
@@ -20,7 +21,11 @@ const playlist = await readPlaylist(playlistPath).catch((error) => {
   }
   return {};
 });
-for (const [name, record] of Object.entries(playlist)) {
+const { devices, ...flatEntries } = playlist;
+for (const [name, record] of Object.entries(flatEntries)) {
+  upsertRecord(registry, name, record);
+}
+for (const [name, record] of Object.entries(flattenDeviceReadings(devices))) {
   upsertRecord(registry, name, record);
 }
 

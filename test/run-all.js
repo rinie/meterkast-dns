@@ -9,3 +9,4 @@ import "./playlist.test.js";
 import "./backup.test.js";
 import "./secrets.test.js";
 import "./offsite.test.js";
+import "./ble-gatt.test.js";

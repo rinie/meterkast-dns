@@ -17,3 +17,14 @@ myHpPrinter.address   = "printer.local"
 mqtt-broker.transport     = "mdns"
 mqtt-broker.address       = "_mqtt._tcp.local"
 mqtt-broker.password_env  = "MQTT_BROKER_PASSWORD"
+
+# Nested devices+readings, flattened at load time into
+# kitchen-thermometer-temperature / kitchen-thermometer-battery -- see
+# README.md "Extending to BLE GATT characteristics".
+[devices.kitchen-thermometer]
+transport = "bluetooth"
+address   = "AA:BB:CC:DD:EE:FF"
+
+[devices.kitchen-thermometer.readings]
+temperature = { service = "health-thermometer", characteristic = "temperature-measurement" }
+battery     = { service = "battery-service",     characteristic = "battery-level" }
