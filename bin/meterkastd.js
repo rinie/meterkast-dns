@@ -1,0 +1,21 @@
+#!/usr/bin/env node
+import { createRegistry } from "../src/core/registry/create-registry.js";
+import { upsertRecord } from "../src/core/registry/upsert-record.js";
+import { readPlaylist } from "../src/core/playlist/read-playlist.js";
+import { createServer } from "../src/core/server/create-server.js";
+
+const playlistPath =
+  process.env.METERKAST_PLAYLIST ?? new URL("../device-playlist.toml", import.meta.url);
+
+const registry = createRegistry();
+
+const playlist = await readPlaylist(playlistPath).catch(() => ({}));
+for (const [name, record] of Object.entries(playlist)) {
+  upsertRecord(registry, name, record);
+}
+
+const server = createServer(registry);
+const port = Number(process.env.PORT ?? 8420);
+server.listen(port, () => {
+  console.log(`meterkast-dns listening on http://localhost:${port}`);
+});

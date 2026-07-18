@@ -1,0 +1,8 @@
+// node --test spawns one child process per file for isolation, which breaks
+// under this environment's Git-Bash/MSYS layer (it mis-builds the child
+// process command line). Importing the test files directly, in one process,
+// sidesteps that: node:test still registers and reports every test the same
+// way, it just does not fork a subprocess to do it.
+import "./registry.test.js";
+import "./naming.test.js";
+import "./playlist.test.js";
