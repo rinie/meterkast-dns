@@ -44,6 +44,7 @@ src/
       read-playlist.js         # TOML -> records
       write-playlist.js        # records -> TOML, atomic write + snapshot
       watch-playlist.js        # fs.watch wrapper
+      flatten-device-readings.js  # [devices.*][.readings] -> flat records
       backup/
         snapshot-playlist.js       # orchestrates the dated-backup decision
         format-backup-date.js      # Date -> "YYYY-MM-DD"
@@ -69,6 +70,20 @@ src/
   adapters/
     load-adapters.js            # dynamic import() loader
     static-adapter.js           # example/test adapter, no hardware
+    ble-gatt/
+      ble-gatt-adapter.js          # noble wiring -- UNVERIFIED, see below
+      read-device-readings.js      # connect/read/decode/disconnect one device
+      group-readings-by-address.js # flat records -> Map<address, readings[]>
+      create-async-queue.js        # bridges noble's events to the async generator
+      normalize-address.js         # MAC comparison, case/separator-insensitive
+      resolve-service-uuid.js      # semantic name -> SIG-assigned UUID
+      resolve-characteristic-uuid.js
+      known-services.js            # the SIG registry subset backing the above
+      known-characteristics.js
+      decode-characteristic.js     # dispatches by characteristic name
+      decode-temperature-measurement.js  # IEEE-11073 FLOAT, per spec
+      decode-weight-measurement.js       # packed weight+flags, per spec
+      decode-battery-level.js            # uint8 percentage
 bin/
   meterkastd.js                  # entrypoint: loads the playlist, starts the server
   sync-backups.js                 # cron-friendly: pushes backups/ offsite
@@ -79,6 +94,7 @@ test/
   backup.test.js
   secrets.test.js
   offsite.test.js
+  ble-gatt.test.js
   run-all.js                     # see "Testing" below
 device-playlist.example.toml     # fixture/template, committed
 device-playlist.toml             # the real Use-editable data file, gitignored
@@ -130,6 +146,14 @@ backups/                         # dated snapshots, written automatically, gitig
   should do on its own. Tested end-to-end against a local bare repo
   (`git init --bare`) standing in for the real remote — no network or real
   GitHub access needed to verify it works.
+- **BLE via an optional native dependency, isolated at install time too** —
+  `@abandonware/noble` is an `optionalDependency`, not a regular one:
+  `npm install` succeeds whether or not it can build (it's a native addon;
+  in this environment its build fails and npm silently skips it, which is
+  exactly the scenario this was built for — confirmed by actually running
+  `npm install` here). The GATT wiring itself lives behind a dynamic
+  `import()` in `ble-gatt-adapter.js`, so its absence never breaks the core,
+  the other adapters, or `npm test`.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -173,12 +197,32 @@ in README.md), serves `GET /devices`, `GET /devices/:name`, and
 exists yet. `bin/sync-backups.js` runs separately (intended for cron) and
 pushes `backups/` to whatever private git remote you've configured.
 
-**Adapters beyond `static-adapter.js` are out of scope for this draft.** Real
-BLE (BlueZ), USB (`udev`), Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and
-433MHz/IR (RC5/newKaku decoding) adapters need native bindings and, in most
-cases, actual hardware to write against meaningfully. `static-adapter.js`
-exists only to pin down the adapter contract — a default-exported async
-generator yielding records — so a real adapter has a known shape to target.
+**The BLE GATT adapter is real, in two honestly different senses.** The
+UUID resolvers (`resolve-service-uuid.js`, `resolve-characteristic-uuid.js`)
+and the characteristic decoders (`decode-temperature-measurement.js` —
+IEEE 11073-20601 32-bit FLOAT; `decode-weight-measurement.js` — packed
+weight+flags; `decode-battery-level.js`) are genuine, spec-correct
+implementations, verified against known-correct byte sequences from the
+GATT spec (36.5°C, 72.5 kg, both encoded and decoded by hand to confirm the
+math). `read-device-readings.js` — connect once, read and decode every
+reading on a device, always disconnect — is verified against a fake
+peripheral matching `@abandonware/noble`'s documented async API
+(`connectAsync`, `discoverSomeServicesAndCharacteristicsAsync`,
+`disconnectAsync`), including the failure path (a read throwing still
+disconnects) and the missing-characteristic path. `flatten-device-readings.js`
+turns a nested `[devices.name]` + `[devices.name.readings]` playlist section
+into flat, independently queryable registry records — verified end-to-end
+by starting the real daemon against the example playlist and querying
+`GET /devices/kitchen-thermometer-temperature` and `-battery`.
+
+**`ble-gatt-adapter.js` itself — the part that actually calls into
+`@abandonware/noble` to scan and discover peripherals — has not been
+exercised against real BLE hardware in this environment**, and says so in
+its own file comment. Everything it calls is real and tested; its own job
+(driving noble's `discover`/`stateChange` events) isn't. USB (`udev`),
+Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and 433MHz/IR (RC5/newKaku
+decoding) adapters remain out of scope entirely — `static-adapter.js`
+still exists to pin down the plain adapter contract for those.
 
 ## Testing
 

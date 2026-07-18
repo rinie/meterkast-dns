@@ -364,6 +364,11 @@ Two things worth keeping separate rather than blurring together:
   adapter turns pulse timing into a command byte before anything reaches
   the resolver core.
 
+This is implemented, not just designed — see IMPLEMENTATION.md "What's
+actually implemented here" for exactly which parts are real and tested
+(the UUID resolvers, the decoders, the nested-to-flat playlist loading) and
+which one remains unverified against real hardware (the actual BLE scan).
+
 ### What already exists and should be reused, not reinvented
 
 This is a composition problem more than an invention problem — most of the
