@@ -53,6 +53,14 @@ src/
         is-valid-toml.js           # the "validated" gate
     secrets/
       resolve-secret-env.js    # env var name -> its value, or a clear error
+    offsite/
+      sync-git-backups.js      # orchestrates: init if needed, commit, push
+      run-git.js                # execFile("git", args, {cwd}) wrapper
+      is-git-repo.js
+      init-git-repo.js
+      has-uncommitted-changes.js
+      commit-backups.js
+      push-backups.js
     server/
       create-server.js         # routes to the three handlers below
       handle-list.js           # GET /devices
@@ -63,15 +71,19 @@ src/
     static-adapter.js           # example/test adapter, no hardware
 bin/
   meterkastd.js                  # entrypoint: loads the playlist, starts the server
+  sync-backups.js                 # cron-friendly: pushes backups/ offsite
 test/
   registry.test.js
   naming.test.js
   playlist.test.js
+  backup.test.js
   secrets.test.js
+  offsite.test.js
   run-all.js                     # see "Testing" below
 device-playlist.example.toml     # fixture/template, committed
 device-playlist.toml             # the real Use-editable data file, gitignored
 backups/                         # dated snapshots, written automatically, gitignored
+                                  # -- itself its own git repo, pushed offsite
 .env                             # real secret values, gitignored, never committed
 ```
 
@@ -104,6 +116,20 @@ backups/                         # dated snapshots, written automatically, gitig
   variable; `resolveSecretEnv(name)` reads it and throws a clear error if
   it's unset. The real value lives in a gitignored `.env` file, loaded with
   `node --env-file=.env` — native to Node since 20.6, no `dotenv` dependency.
+- **Offsite backup via a git push, not an SDK** — `backups/` becomes its own
+  independent git repo (separate from this repo's own git history), and
+  `syncGitBackups` commits and pushes it to a private remote you configure
+  yourself. This shells out to the `git` CLI via `node:child_process`
+  rather than adding `isomorphic-git` or a cloud SDK as a dependency — git
+  is already load-bearing for this entire project's own workflow, so
+  reusing it here costs nothing new. Auth is whatever your `git`/`gh` is
+  already configured with (SSH key, credential manager) — this code never
+  handles a credential directly. Deliberately does **not** create the
+  private remote itself; that's a one-time manual step
+  (`METERKAST_BACKUP_REMOTE` in `.env`), not something unattended cron code
+  should do on its own. Tested end-to-end against a local bare repo
+  (`git init --bare`) standing in for the real remote — no network or real
+  GitHub access needed to verify it works.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -139,11 +165,13 @@ backups/                         # dated snapshots, written automatically, gitig
 ## What's actually implemented here
 
 The **core** — registry, naming suggestions, safe playlist read/write,
-secret resolution, and the HTTP query/subscribe API — is real and covered
-by tests. `bin/meterkastd.js` loads `device-playlist.toml` (not the
-`.example.toml` fixture — see "Secrets never go in the playlist" in
-README.md), serves `GET /devices`, `GET /devices/:name`, and `GET /events`
-(SSE), and warns rather than crashing if no playlist file exists yet.
+secret resolution, offsite git sync, and the HTTP query/subscribe API — is
+real and covered by tests. `bin/meterkastd.js` loads `device-playlist.toml`
+(not the `.example.toml` fixture — see "Secrets never go in the playlist"
+in README.md), serves `GET /devices`, `GET /devices/:name`, and
+`GET /events` (SSE), and warns rather than crashing if no playlist file
+exists yet. `bin/sync-backups.js` runs separately (intended for cron) and
+pushes `backups/` to whatever private git remote you've configured.
 
 **Adapters beyond `static-adapter.js` are out of scope for this draft.** Real
 BLE (BlueZ), USB (`udev`), Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and
@@ -175,4 +203,12 @@ node --env-file=.env bin/meterkastd.js   # --env-file is optional if you have no
 curl http://localhost:8420/devices                     # PORT=8420 by default
 curl http://localhost:8420/devices/myHpPrinter
 curl -N http://localhost:8420/events                    # streams SSE change events
+```
+
+Offsite backup, once you've created a private repo yourself (GitHub,
+GitLab, self-hosted — anything `git push` can reach):
+
+```sh
+echo 'METERKAST_BACKUP_REMOTE=git@github.com:you/meterkast-dns-backups.git' >> .env
+node --env-file=.env bin/sync-backups.js
 ```

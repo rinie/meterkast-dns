@@ -8,7 +8,8 @@
     "node": ">=22"
   },
   "bin": {
-    "meterkastd": "./bin/meterkastd.js"
+    "meterkastd": "./bin/meterkastd.js",
+    "meterkast-sync-backups": "./bin/sync-backups.js"
   },
   "scripts": {
     "test": "node test/run-all.js"
