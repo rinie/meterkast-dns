@@ -95,7 +95,11 @@ separate question — see IMPLEMENTATION.md):
 - **BLE adapter** — wraps BlueZ (or platform equivalent), does continuous
   background scanning, and once a device is confirmed once by the user it's
   registered under a user-chosen name permanently — the AirPods pattern,
-  generalized past a single vendor instead of copied by one.
+  generalized past a single vendor instead of copied by one. For devices
+  with more than one GATT reading worth exposing (a thermometer's
+  temperature and battery, say), also resolves the SIG-standardized
+  service/characteristic names to their real UUIDs. See "Extending to BLE
+  GATT characteristics" below.
 - **USB adapter** — wraps `udev`, maps VID:PID+serial to a stable name that
   survives the device moving to a different physical port. This is close to
   what `udev`'s `by-id` symlinks already do locally and quietly — the adapter
@@ -306,6 +310,59 @@ brands, so a shared default command table could cover most buttons out of
 the box, with per-device entries only for the exceptions — the same
 "resolver supplies the default, Use only overrides" shape as an npm semver
 range.)
+
+### Extending to BLE GATT characteristics (thermometers, scales)
+
+The same address-once, nested-underneath pattern applies to BLE devices
+that expose more than one reading, because a GATT service/characteristic
+is structurally the same shape as an RC5 button or a newKaku unit: one
+physical thing (the MAC, stored once), several named sub-things underneath
+it that vary:
+
+```toml
+[devices.kitchen-thermometer]
+transport = "bluetooth"
+address   = "AA:BB:CC:DD:EE:FF"
+
+[devices.kitchen-thermometer.readings]
+temperature = { service = "health-thermometer", characteristic = "temperature-measurement" }
+battery     = { service = "battery-service",     characteristic = "battery-level" }
+
+[devices.bathroom-scale]
+transport = "bluetooth"
+address   = "11:22:33:44:55:66"
+
+[devices.bathroom-scale.readings]
+weight  = { service = "weight-scale",    characteristic = "weight-measurement" }
+battery = { service = "battery-service", characteristic = "battery-level" }
+```
+
+`"health-thermometer"` and `"temperature-measurement"` stand in for the
+real values — `0x1809` and `0x2A1C`, 16-bit UUIDs assigned by the
+[Bluetooth SIG's Assigned Numbers registry](https://www.bluetooth.com/specifications/assigned-numbers/).
+This is a stronger case than RC5's semi-standardization by one company: the
+SIG registry is a real, formally maintained, published resolver — Weight
+Scale, Battery Service, Heart Rate all have committee-assigned names and
+numbers the same way DNS's root zone does. The BLE adapter holds the small
+lookup table translating those semantic names to the real UUIDs, the same
+move as translating `"power"` to RC5's command byte — a resolver behind the
+resolver, never leaking into the file a human edits.
+
+Two things worth keeping separate rather than blurring together:
+
+- **A proprietary GATT service** (a 128-bit vendor UUID, no SIG name) has no
+  semantic name to fall back to — the value is just the raw UUID string,
+  the same honest fallback as an undecoded IR remote falling back to LIRC's
+  raw pulse capture. Not every BLE device gets the semantic treatment; only
+  ones using standardized services do.
+- **Decoding the actual bytes** a characteristic returns — Temperature
+  Measurement is an IEEE-11073 float plus a flags byte; Weight Measurement
+  packs weight, flags, and sometimes a timestamp into one blob — is adapter
+  code, not playlist content. The TOML only names *which* characteristic to
+  read; turning those bytes into an actual number in °C or kg is exactly
+  the Def-Push ceremony the adapter exists to absorb, the same way the RC5
+  adapter turns pulse timing into a command byte before anything reaches
+  the resolver core.
 
 ### What already exists and should be reused, not reinvented
 
