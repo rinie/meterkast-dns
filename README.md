@@ -257,6 +257,14 @@ address  = "0x0139FA2"         # per-transmitter ID, paired once
 1.name = "floor-lamp"
 ```
 
+(TOML syntax note: `[remotes.rc5-tv]` followed by `protocol = "rc5"` and
+`remotes.rc5-tv.protocol = "rc5"` written as a dotted key are the same
+underlying nested table — `[section]` headers and dotted keys are two
+notations for identical data, not two different formats. This doc uses
+whichever reads better for the record's shape: dotted keys for the short,
+two-field device entries earlier in the file, `[section]` headers here where
+each remote has several grouped sub-fields.)
+
 LIRC's `lircd.conf` is the cautionary example here, not the model to imitate.
 Its non-raw mode does factor out the shared pulse-timing definition once per
 remote, but still stores each button as the *full combined* address+command
