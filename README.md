@@ -87,9 +87,10 @@ see the stable name side.
 
 ### Adapters, not one monolith
 
-Each transport gets its own small adapter process whose *only* job is
-absorbing that transport's ceremony and noise into one clean record in the
-core store:
+Each transport gets its own small adapter whose *only* job is absorbing that
+transport's ceremony and noise into one clean record in the core store
+(whether an adapter runs in-process or gets true OS-level isolation is a
+separate question — see IMPLEMENTATION.md):
 
 - **BLE adapter** — wraps BlueZ (or platform equivalent), does continuous
   background scanning, and once a device is confirmed once by the user it's

@@ -78,9 +78,29 @@ device-playlist.toml           # the actual Use-editable data file
   whose default export is an async generator yielding
   `{name, transport, address, meta?}` records, loaded via native dynamic
   `import()`. That is Node's own plugin-loading primitive; no framework
-  needed. Whether a given adapter runs in-process or as a separate
-  `child_process` (real crash isolation, closer to the LSP model this
-  mirrors) is a per-adapter choice, not a framework-wide one.
+  needed.
+
+  Isolation is not the default, and it is not about throughput. Node's
+  event loop already handles many concurrent I/O-bound adapters — MQTT/mDNS,
+  file watching — fine in one process; async I/O is strictly better there
+  than the overhead of a separate process would be. The one real reason to
+  isolate an adapter is a native binding with genuine crash risk: BLE
+  (BlueZ, via a binding like `@abandonware/noble`) and USB (`libusb`/
+  `node-usb`) are native C/C++ addons, and a fault in the native library —
+  a misbehaving USB device, a BlueZ bug — takes the whole process down with
+  it, event loop included, because the failure isn't happening in JS where
+  the event loop has any say. A `child_process` contains that: the adapter
+  dies, the core and every other adapter keep running. This is
+  precautionary, not a response to crashes being common — well-behaved
+  native bindings should rarely fail; the isolation exists for the rare
+  case, not the typical one.
+
+  CPU-bound work — decoding RC5/newKaku pulse timing in a tight loop, say —
+  is a different problem with a different answer: `worker_threads`, not
+  `child_process`. Parallelism without leaving the process, shared memory
+  instead of IPC serialization, no loss of the async-I/O model. Reaching for
+  a full OS process there would be solving a throughput problem with a
+  fault-isolation tool.
 
 ## What's actually implemented here
 
