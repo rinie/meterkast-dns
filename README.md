@@ -181,11 +181,12 @@ This design grew directly out of the "Gutenberg/Semantic" blog series at
 - [Borg's Arrogance](https://rinie.github.io/2026/07/30/resolver-hardens-or-atrophies/) — when a resolver is and isn't worth building.
 - [The Meterkast Pattern](https://rinie.github.io/2026/08/03/the-meterkast-pattern/) — the router/NAT/DHCP demarc this repo's name and core architecture borrow directly.
 
-The series' own working notes (`CONTEXT-handover.md` in `rinie.github.io`)
-list a queued, undrafted seed note titled `note-reflection-external-resolver.md`.
-This repo folds in the *spirit* implied by that title — this write-up has
-**not** seen that note's actual contents (it lives in an external `outputs/`
-folder that wasn't shared with this session) — so treat this as a fresh
-design inspired by the queue entry, not a merge of existing text. If the
-original note exists and says something different, that should take
-precedence.
+The series' own working notes (`CONTEXT-handover.md` in `rinie.github.io`,
+copied verbatim into [`series-notes/CONTEXT-handover.md`](series-notes/CONTEXT-handover.md)
+in this repo for provenance) list a queued, undrafted seed note titled
+`note-reflection-external-resolver.md`. This repo folds in the *spirit*
+implied by that title — this write-up has **not** seen that note's actual
+contents (it lives in an external `outputs/` folder that wasn't shared with
+this session) — so treat this as a fresh design inspired by the queue entry,
+not a merge of existing text. If the original note exists and says something
+different, that should take precedence.
