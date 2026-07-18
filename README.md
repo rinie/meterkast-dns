@@ -109,6 +109,10 @@ core store:
   (`_mqtt._tcp.local`) for the broker instead of requiring a hardcoded IP at
   provisioning time. This one doesn't need new infrastructure at all — mDNS
   already exists and already solves it; MQTT devices simply never adopted it.
+- **433MHz/IR adapter** — decodes structured RF/IR protocols (RC5, newKaku,
+  NEC) into `{protocol, address, command}` and stores the address once
+  instead of repeating it per button; genuinely undecodable remotes fall back
+  to LIRC-style raw pulse capture. See "Extending to 433MHz/IR remotes" below.
 
 Splitting the system this way mirrors the Language Server Protocol / VS Code
 extension-process model: a narrow, stable core interface, with all the
@@ -136,6 +140,93 @@ different transport — without touching anything that queries the name.
   different port, Zigbee re-joins with a new network address) without the
   name changing, exactly the way an A record can repoint without any
   bookmark breaking.
+
+### The device-playlist file format
+
+The mapping file itself — the artifact a person actually opens and hand-edits
+— is TOML, not YAML or JSON. YAML's indentation sensitivity and implicit
+typing (a MAC-looking value getting silently coerced, the classic Norway
+problem) is the wrong kind of ambiguity for a file full of hand-typed
+physical addresses; JSON has no comments, which defeats the point of a file
+meant to carry human annotations ("moved to Dirigera 2026-03"). TOML's
+dotted-key and inline-table syntax keep the file flat — one record per name —
+closer to a hosts file or a DNS zone file than to a nested config tree:
+
+```toml
+myHpPrinter.transport = "mdns"
+myHpPrinter.address   = "printer.local"
+
+kitchen-light.transport = "zigbee"
+kitchen-light.address   = "0x00124b0018f3a1c2"
+
+car-hands-free.transport = "bluetooth"
+car-hands-free.address   = "AA:BB:CC:DD:EE:FF"
+```
+
+(JSON5 with Mozilla's `about:config`-style dotted keys reaches the same flat
+shape and is worth it if the resolver ever needs to round-trip its config as
+an HTTP API response — but TOML's flatness comes from the format's own
+culture, the way Cargo.toml and pyproject.toml already use it, rather than
+from a convention that has to be separately enforced. That's the deciding
+factor here.)
+
+**The naming rule: keys are always Semantic, values are always Gutenberg —
+never the reverse.** A key is always a name the Use side chose (`myHpPrinter`,
+`kitchen-light`); the value is always whatever the transport actually
+resolves to (`printer.local`, a MAC address, an IEEE address) and is treated
+as an opaque string, never parsed as structure. Same discipline as the `@`
+sign — left side owned by the Use, right side owned by the resolver — made
+into an explicit file-format constraint instead of an implicit habit. It also
+resolves a subtlety that looked like a real problem earlier: a dotted address
+like `printer.local` only collides with TOML's dotted-key syntax if it's used
+*as a key*. Used as a value, it's just a string — the rule that values never
+become keys is what keeps the format safe.
+
+### Extending to 433MHz/IR remotes (RC5, newKaku, LIRC)
+
+The same address-once pattern extends past network transports into RF/IR
+remotes, because RC5 and newKaku (the KAKU/Klik-Aan-Klik-Uit protocol used by
+Domoticz/RFLink-style 433MHz bridges) are both *decomposable* protocols — a
+fixed address/system field, plus a per-button command or unit field that's
+the only thing that actually varies:
+
+```toml
+[remotes.rc5-tv]
+protocol = "rc5"
+address  = 0                  # RC5 system code, shared by every button
+
+[remotes.rc5-tv.commands]
+power      = 12
+volume-up  = 16
+channel-3  = 3
+
+[remotes.newkaku-livingroom]
+protocol = "newkaku"
+address  = "0x0139FA2"         # per-transmitter ID, paired once
+
+[remotes.newkaku-livingroom.units]
+3.name = "newspaper-reading-lamp"
+1.name = "floor-lamp"
+```
+
+LIRC's `lircd.conf` is the cautionary example here, not the model to imitate.
+Its non-raw mode does factor out the shared pulse-timing definition once per
+remote, but still stores each button as the *full combined* address+command
+code, repeated per button — the address bits are constant but re-baked into
+every entry, because the format never splits the two fields apart. That's
+the IR-protocol version of `import com.google.gson.Gson`: a constant welded
+into every use site instead of factored out once behind a name (see the
+[Java post](https://rinie.github.io/2026/07/29/java-reversed-hierarchy-forgot-resolver/)
+in §3). LIRC's genuine raw mode — bare pulse/space timing, no protocol decode
+at all — stays a legitimate fallback for remotes that really are undecodable
+proprietary noise; that complexity is essential, not accidental, because
+there's no address to factor out. RC5 and newKaku aren't in that category —
+a resolver-style adapter should decode them and store the address exactly
+once. (RC5 command codes were also semi-standardized by Philips across TV
+brands, so a shared default command table could cover most buttons out of
+the box, with per-device entries only for the exceptions — the same
+"resolver supplies the default, Use only overrides" shape as an npm semver
+range.)
 
 ### What already exists and should be reused, not reinvented
 
