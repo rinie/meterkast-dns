@@ -42,9 +42,15 @@ src/
       suggest-name.js       # composes the three above
     playlist/
       read-playlist.js         # TOML -> records
-      write-playlist.js        # records -> TOML, atomic write + backup
-      backup-existing-file.js  # copies path -> path.bak before an overwrite
+      write-playlist.js        # records -> TOML, atomic write + snapshot
       watch-playlist.js        # fs.watch wrapper
+      backup/
+        snapshot-playlist.js       # orchestrates the dated-backup decision
+        format-backup-date.js      # Date -> "YYYY-MM-DD"
+        format-backup-filename.js  # (baseName, date, version) -> filename
+        list-backup-versions.js    # existing version numbers for a day
+        read-latest-backup.js      # content of the highest version for a day
+        is-valid-toml.js           # the "validated" gate
     secrets/
       resolve-secret-env.js    # env var name -> its value, or a clear error
     server/
@@ -65,7 +71,7 @@ test/
   run-all.js                     # see "Testing" below
 device-playlist.example.toml     # fixture/template, committed
 device-playlist.toml             # the real Use-editable data file, gitignored
-device-playlist.toml.bak         # last-known-good, written automatically, gitignored
+backups/                         # dated snapshots, written automatically, gitignored
 .env                             # real secret values, gitignored, never committed
 ```
 
@@ -78,11 +84,19 @@ device-playlist.toml.bak         # last-known-good, written automatically, gitig
   `chokidar`. Its cross-platform quirks (inotify vs FSEvents vs Windows) are
   real; not a concern for the current single-file, single-host use case.
 - **Safe writes to the playlist** — `writePlaylist` writes to a temp file
-  and renames it into place (a crash mid-write can't leave a truncated
-  file), and keeps one rotated `.bak` of the previous version before
-  overwriting. This is last-known-good, deliberately independent of git: it
-  protects a bad hand-edit or a buggy adapter write without needing a commit
-  to exist first. The same pattern the series already names in
+  and renames it into place, so a crash mid-write can't leave a truncated
+  file on disk. Before every overwrite it also snapshots the current state
+  into a `backups/` directory, Domoticz-style: `device-playlist-YYYY-MM-DD.toml`
+  for the first validated change on a given day, `-2`, `-3`, ... for
+  further ones the same day. "Validated" means the pre-write content parses
+  as TOML (a corrupt or truncated state is never preserved as if it were
+  good) and genuinely differs from the most recent backup (an unchanged
+  re-write doesn't create a duplicate generation). This is last-known-good,
+  deliberately independent of git: it protects a bad hand-edit or a buggy
+  adapter write without needing a commit to exist first, and it directly
+  answers the "history" question raised earlier in the series — what an
+  address used to be before it moved — without needing a database. The same
+  last-known-good pattern the series already names in
   [It Is Always DNS](https://rinie.github.io/2026/07/26/it-is-always-dns-version-chain/),
   applied one layer down.
 - **Secrets via `.env`, never in the playlist** — a field like
