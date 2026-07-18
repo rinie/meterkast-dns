@@ -231,6 +231,28 @@ like `printer.local` only collides with TOML's dotted-key syntax if it's used
 *as a key*. Used as a value, it's just a string — the rule that values never
 become keys is what keeps the format safe.
 
+**Secrets never go in the playlist — not even as a value.** The playlist
+holds addresses, never credentials or keys. `device-playlist.example.toml`
+in this repo is a fixture for docs and tests; a real, running instance's
+actual playlist is named `device-playlist.toml` (gitignored) and should
+never be committed anywhere public, since even addresses reveal real home-
+network topology. A field that needs a credential — an MQTT broker password,
+say — names an environment variable instead of holding the value:
+
+```toml
+mqtt-broker.transport    = "mdns"
+mqtt-broker.address      = "_mqtt._tcp.local"
+mqtt-broker.password_env = "MQTT_BROKER_PASSWORD"
+```
+
+The real value lives in a gitignored `.env` file, loaded by running with
+`node --env-file=.env` (native to Node, no dependency). This isn't a special
+case of the naming rule above — it's a stronger one: a secret isn't Semantic
+*or* Gutenberg, and doesn't belong in the resolver's mapping at all. The
+concrete case where this matters most: the Zigbee coordinator-migration idea
+below needs to back up a network encryption key, and that key must go
+somewhere else entirely — never into this file, committed or not.
+
 ### Extending to 433MHz/IR remotes (RC5, newKaku, LIRC)
 
 The same address-once pattern extends past network transports into RF/IR

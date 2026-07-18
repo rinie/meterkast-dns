@@ -1,6 +1,0 @@
-# Use-editable. Keys are always Semantic (names you chose), values are always
-# Gutenberg (whatever the transport resolves to) -- never the reverse.
-# See README.md #2 "The device-playlist file format" for the full rule.
-
-myHpPrinter.transport = "mdns"
-myHpPrinter.address   = "printer.local"

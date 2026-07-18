@@ -1,1 +1,7 @@
 node_modules/
+
+# Real data, not the fixture: never commit your actual playlist, its
+# backup history, or secrets.
+device-playlist.toml
+backups/
+.env

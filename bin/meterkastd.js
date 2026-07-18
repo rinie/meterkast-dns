@@ -9,7 +9,17 @@ const playlistPath =
 
 const registry = createRegistry();
 
-const playlist = await readPlaylist(playlistPath).catch(() => ({}));
+const playlist = await readPlaylist(playlistPath).catch((error) => {
+  if (error.code === "ENOENT") {
+    console.warn(
+      `No device-playlist.toml found at ${playlistPath} -- starting empty. ` +
+        "Copy device-playlist.example.toml to device-playlist.toml to get started.",
+    );
+  } else {
+    throw error;
+  }
+  return {};
+});
 for (const [name, record] of Object.entries(playlist)) {
   upsertRecord(registry, name, record);
 }

@@ -1,0 +1,19 @@
+# This is a fixture/template, not real data -- copy it to device-playlist.toml
+# (gitignored) and edit that instead. Never commit your real playlist here.
+#
+# Use-editable. Keys are always Semantic (names you chose), values are always
+# Gutenberg (whatever the transport resolves to) -- never the reverse.
+# See README.md #2 "The device-playlist file format" for the full rule.
+#
+# Never put a credential or key directly in this file, even in your private
+# copy. Reference the name of an environment variable instead (see the
+# mqtt-broker example below) and put the real value in a gitignored .env
+# file, loaded with `node --env-file=.env`. See README.md #2 "Secrets never
+# go in the playlist" for the full rule.
+
+myHpPrinter.transport = "mdns"
+myHpPrinter.address   = "printer.local"
+
+mqtt-broker.transport     = "mdns"
+mqtt-broker.address       = "_mqtt._tcp.local"
+mqtt-broker.password_env  = "MQTT_BROKER_PASSWORD"

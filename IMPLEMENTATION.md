@@ -41,25 +41,50 @@ src/
       suffix-from-counter.js
       suggest-name.js       # composes the three above
     playlist/
-      read-playlist.js       # TOML -> records
-      write-playlist.js      # records -> TOML
-      watch-playlist.js      # fs.watch wrapper
+      read-playlist.js         # TOML -> records
+      write-playlist.js        # records -> TOML, atomic write + snapshot
+      watch-playlist.js        # fs.watch wrapper
+      backup/
+        snapshot-playlist.js       # orchestrates the dated-backup decision
+        format-backup-date.js      # Date -> "YYYY-MM-DD"
+        format-backup-filename.js  # (baseName, date, version) -> filename
+        list-backup-versions.js    # existing version numbers for a day
+        read-latest-backup.js      # content of the highest version for a day
+        is-valid-toml.js           # the "validated" gate
+    secrets/
+      resolve-secret-env.js    # env var name -> its value, or a clear error
+    offsite/
+      sync-git-backups.js      # orchestrates: init if needed, commit, push
+      run-git.js                # execFile("git", args, {cwd}) wrapper
+      is-git-repo.js
+      init-git-repo.js
+      has-uncommitted-changes.js
+      commit-backups.js
+      push-backups.js
     server/
-      create-server.js       # routes to the three handlers below
-      handle-list.js         # GET /devices
-      handle-get.js           # GET /devices/:name
-      handle-subscribe.js     # GET /events (SSE)
+      create-server.js         # routes to the three handlers below
+      handle-list.js           # GET /devices
+      handle-get.js             # GET /devices/:name
+      handle-subscribe.js       # GET /events (SSE)
   adapters/
-    load-adapters.js          # dynamic import() loader
-    static-adapter.js         # example/test adapter, no hardware
+    load-adapters.js            # dynamic import() loader
+    static-adapter.js           # example/test adapter, no hardware
 bin/
-  meterkastd.js                # entrypoint: loads the playlist, starts the server
+  meterkastd.js                  # entrypoint: loads the playlist, starts the server
+  sync-backups.js                 # cron-friendly: pushes backups/ offsite
 test/
   registry.test.js
   naming.test.js
   playlist.test.js
-  run-all.js                   # see "Testing" below
-device-playlist.toml           # the actual Use-editable data file
+  backup.test.js
+  secrets.test.js
+  offsite.test.js
+  run-all.js                     # see "Testing" below
+device-playlist.example.toml     # fixture/template, committed
+device-playlist.toml             # the real Use-editable data file, gitignored
+backups/                         # dated snapshots, written automatically, gitignored
+                                  # -- itself its own git repo, pushed offsite
+.env                             # real secret values, gitignored, never committed
 ```
 
 ## Library choices, kept minimal on purpose
@@ -70,6 +95,41 @@ device-playlist.toml           # the actual Use-editable data file
 - **Watching the hand-edited file** — native `fs.promises.watch()`, no
   `chokidar`. Its cross-platform quirks (inotify vs FSEvents vs Windows) are
   real; not a concern for the current single-file, single-host use case.
+- **Safe writes to the playlist** — `writePlaylist` writes to a temp file
+  and renames it into place, so a crash mid-write can't leave a truncated
+  file on disk. Before every overwrite it also snapshots the current state
+  into a `backups/` directory, Domoticz-style: `device-playlist-YYYY-MM-DD.toml`
+  for the first validated change on a given day, `-2`, `-3`, ... for
+  further ones the same day. "Validated" means the pre-write content parses
+  as TOML (a corrupt or truncated state is never preserved as if it were
+  good) and genuinely differs from the most recent backup (an unchanged
+  re-write doesn't create a duplicate generation). This is last-known-good,
+  deliberately independent of git: it protects a bad hand-edit or a buggy
+  adapter write without needing a commit to exist first, and it directly
+  answers the "history" question raised earlier in the series — what an
+  address used to be before it moved — without needing a database. The same
+  last-known-good pattern the series already names in
+  [It Is Always DNS](https://rinie.github.io/2026/07/26/it-is-always-dns-version-chain/),
+  applied one layer down.
+- **Secrets via `.env`, never in the playlist** — a field like
+  `mqtt-broker.password_env = "MQTT_BROKER_PASSWORD"` names an environment
+  variable; `resolveSecretEnv(name)` reads it and throws a clear error if
+  it's unset. The real value lives in a gitignored `.env` file, loaded with
+  `node --env-file=.env` — native to Node since 20.6, no `dotenv` dependency.
+- **Offsite backup via a git push, not an SDK** — `backups/` becomes its own
+  independent git repo (separate from this repo's own git history), and
+  `syncGitBackups` commits and pushes it to a private remote you configure
+  yourself. This shells out to the `git` CLI via `node:child_process`
+  rather than adding `isomorphic-git` or a cloud SDK as a dependency — git
+  is already load-bearing for this entire project's own workflow, so
+  reusing it here costs nothing new. Auth is whatever your `git`/`gh` is
+  already configured with (SSH key, credential manager) — this code never
+  handles a credential directly. Deliberately does **not** create the
+  private remote itself; that's a one-time manual step
+  (`METERKAST_BACKUP_REMOTE` in `.env`), not something unattended cron code
+  should do on its own. Tested end-to-end against a local bare repo
+  (`git init --bare`) standing in for the real remote — no network or real
+  GitHub access needed to verify it works.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -104,10 +164,14 @@ device-playlist.toml           # the actual Use-editable data file
 
 ## What's actually implemented here
 
-The **core** — registry, naming suggestions, playlist read/write, and the
-HTTP query/subscribe API — is real and covered by tests. `bin/meterkastd.js`
-loads `device-playlist.toml`, serves `GET /devices`, `GET /devices/:name`,
-and `GET /events` (SSE).
+The **core** — registry, naming suggestions, safe playlist read/write,
+secret resolution, offsite git sync, and the HTTP query/subscribe API — is
+real and covered by tests. `bin/meterkastd.js` loads `device-playlist.toml`
+(not the `.example.toml` fixture — see "Secrets never go in the playlist"
+in README.md), serves `GET /devices`, `GET /devices/:name`, and
+`GET /events` (SSE), and warns rather than crashing if no playlist file
+exists yet. `bin/sync-backups.js` runs separately (intended for cron) and
+pushes `backups/` to whatever private git remote you've configured.
 
 **Adapters beyond `static-adapter.js` are out of scope for this draft.** Real
 BLE (BlueZ), USB (`udev`), Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and
@@ -134,8 +198,17 @@ accordingly.
 ```sh
 npm install
 npm test
-node bin/meterkastd.js        # PORT=8420 by default
-curl http://localhost:8420/devices
+cp device-playlist.example.toml device-playlist.toml   # your real, gitignored copy
+node --env-file=.env bin/meterkastd.js   # --env-file is optional if you have no secrets yet
+curl http://localhost:8420/devices                     # PORT=8420 by default
 curl http://localhost:8420/devices/myHpPrinter
-curl -N http://localhost:8420/events   # streams SSE change events
+curl -N http://localhost:8420/events                    # streams SSE change events
+```
+
+Offsite backup, once you've created a private repo yourself (GitHub,
+GitLab, self-hosted — anything `git push` can reach):
+
+```sh
+echo 'METERKAST_BACKUP_REMOTE=git@github.com:you/meterkast-dns-backups.git' >> .env
+node --env-file=.env bin/sync-backups.js
 ```
