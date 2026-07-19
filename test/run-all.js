@@ -11,3 +11,6 @@ import "./secrets.test.js";
 import "./offsite.test.js";
 import "./server.test.js";
 import "./dirigera.test.js";
+import "./ecowitt.test.js";
+import "./smartbridge.test.js";
+import "./run-polling-adapter.test.js";

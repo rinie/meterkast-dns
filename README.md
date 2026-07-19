@@ -465,6 +465,49 @@ See IMPLEMENTATION.md for what's verified here versus BLE's honest gap —
 this one goes further, since a self-signed HTTPS server is fully fakeable
 in a test without needing the real hardware.
 
+### Extending to cloud vendor APIs (Ecowitt, Smartbridge/ICS2000) — and their honest limits
+
+Worth naming plainly rather than blurring together: these two are a real
+step down from Dirigera, not a lateral move. Dirigera is local — a LAN IP,
+no internet dependency, the AirPods pattern done properly. Ecowitt
+(`api.ecowitt.net`, weather-station readings) and Smartbridge
+(`trustsmartcloud2.com`, KlikAanKlikUit's ICS2000 cloud, syncing the same
+newKaku devices §2's RF/IR section already covers locally) are both cloud
+services — the exact "Alexa, the cloud resolver that moves without asking"
+pattern the series criticizes elsewhere. They still fit the same adapter
+contract, and they're still worth having, but the resolver here is
+borrowed from a third party staying online and compatible, not owned the
+way Dirigera's local hub is.
+
+```toml
+weather-station.transport = "ecowitt"
+weather-station.address   = "<device-mac>"
+
+kaku-plug.transport = "smartbridge"
+kaku-plug.address   = "<ics2000-device-id>"
+```
+
+Credentials live in `.env` — `ECOWITT_APPLICATION_KEY`/`ECOWITT_API_KEY`,
+`SMARTBRIDGE_EMAIL`/`SMARTBRIDGE_MAC`/`SMARTBRIDGE_PASSWORD_HASH` — never
+the playlist, same rule as everywhere else. Both are real public cloud
+APIs with properly CA-signed certificates, unlike Dirigera's self-signed
+local one — cert verification stays on by default here; there's no
+legitimate reason to skip it for a service the whole internet also talks to.
+
+**Ecowitt is a clean, well-behaved API**: `real_time` returns readings as
+`{time, unit, value}` triples, already labeled, already unit-tagged,
+passed through as `meta` the same way Dirigera's `attributes` are.
+
+**Smartbridge/ICS2000 is the honest-limit case, confirmed against the real
+API rather than assumed**: its `sync` endpoint returns each device's
+`data` and `status` fields as opaque, encrypted, base64-looking ciphertext
+— no documented or publicly known way to decrypt them. Same fallback as an
+undecoded 128-bit BLE UUID or LIRC's raw pulse mode: pass the ciphertext
+through unchanged rather than guess at it. What *is* usable without
+decryption: `version_status` and `version_data` still change whenever the
+device's real state changes, which is a genuine "something happened"
+signal even without knowing what.
+
 ### What already exists and should be reused, not reinvented
 
 This is a composition problem more than an invention problem — most of the
