@@ -424,6 +424,47 @@ design makes is explicit: give up the always-on background daemon for
 BLE/USB specifically, in exchange for zero native dependencies, anywhere,
 for anyone.
 
+### Extending to vendor-hub REST APIs (Dirigera, and Matter by proxy)
+
+§1 named the shape a working resolver takes for smart-home devices: a
+single vendor owning both sides of the boundary, the way Apple does for
+AirPods. IKEA's Dirigera hub is a second, independent instance of exactly
+that pattern — its local REST API (`GET /v1/devices` over HTTPS) already
+returns Zigbee *and* Matter/Thread devices as flat, clean JSON:
+`isOn`, `lightLevel`, `batteryPercentage`, no protocol detail leaking
+through. It doesn't fix Matter's committee-designed commissioning ceremony
+described in §1 — it sidesteps it, the same way zigbee2mqtt's
+`friendly_name` map (already cited under "What already exists") sidesteps
+raw Zigbee. A resolver behind the resolver, bolted onto one vendor's hub
+rather than existing as open infrastructure — same honest limit as
+zigbee2mqtt, just covering Matter too now.
+
+```toml
+kitchen-lamp.transport = "dirigera"
+kitchen-lamp.address   = "<dirigera-device-id>"
+```
+
+Connection config — the hub's hostname and bearer token — lives in `.env`,
+not the playlist: `DIRIGERA_HOSTNAME` and `DIRIGERA_BEARER_TOKEN`. The
+hostname isn't a secret, but it's real-instance-specific config that
+shouldn't be hardcoded into a committed file either, the same reasoning
+`METERKAST_BACKUP_REMOTE` already follows. Unlike BLE/USB this needs no
+browser and no native binding at all — it's plain HTTPS with a bearer
+token, which Node handles natively, so it runs as a normal polling adapter
+in-process, no isolation concern the way a native binding would be.
+
+One detail worth being explicit about rather than quietly working around:
+Dirigera's local API uses a self-signed certificate, because there's no
+certificate authority for a LAN IP address — normal for this class of
+device, not a shortcut. The fix is to skip verification for that one
+request specifically, never globally (`NODE_TLS_REJECT_UNAUTHORIZED=0`
+would disable certificate checking for every HTTPS call the process makes,
+not just this one hub).
+
+See IMPLEMENTATION.md for what's verified here versus BLE's honest gap —
+this one goes further, since a self-signed HTTPS server is fully fakeable
+in a test without needing the real hardware.
+
 ### What already exists and should be reused, not reinvented
 
 This is a composition problem more than an invention problem — most of the
@@ -433,6 +474,8 @@ pieces already exist somewhere, just not connected:
 - Avahi / Bonjour mDNS-SD (the fix MQTT broker discovery already has
   available and doesn't use)
 - zigbee2mqtt's `friendly_name` map (Zigbee)
+- Dirigera's own `GET /v1/devices` (Zigbee and Matter/Thread both, already
+  flattened to clean JSON — see "Extending to vendor-hub REST APIs" above)
 - Home Assistant's entity/device registry, which gets closest to this pattern
   today but is bundled into one large platform rather than exposed as a
   small, standalone resolver anything else could query directly
