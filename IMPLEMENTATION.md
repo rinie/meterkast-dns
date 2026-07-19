@@ -105,8 +105,10 @@ backups/                         # dated snapshots, written automatically, gitig
 - **Secrets via `.env`, never in the playlist** — a field like
   `mqtt-broker.password_env = "MQTT_BROKER_PASSWORD"` names an environment
   variable; `resolveSecretEnv(name)` reads it and throws a clear error if
-  it's unset. The real value lives in a gitignored `.env` file, loaded with
-  `node --env-file=.env` — native to Node since 20.6, no `dotenv` dependency.
+  it's unset. The real value lives in a gitignored `.env` file. `npm start`
+  loads it automatically via `--env-file-if-exists=.env` — native to Node,
+  no `dotenv` dependency — which is a no-op when `.env` doesn't exist, so
+  the same command works whether or not you've set one up.
 - **Offsite backup via a git push, not an SDK** — `backups/` becomes its own
   independent git repo (separate from this repo's own git history), and
   `syncGitBackups` commits and pushes it to a private remote you configure
@@ -345,7 +347,7 @@ accordingly.
 npm install
 npm test
 cp device-playlist.example.toml device-playlist.toml   # your real, gitignored copy
-npm start                       # or: npm run start:env, if you have a .env with secrets
+npm start                       # loads .env automatically if you have one, no flag needed
 curl http://localhost:8420/devices                     # PORT=8420 by default
 curl http://localhost:8420/devices/myHpPrinter
 curl -N http://localhost:8420/events                    # streams SSE change events
@@ -376,7 +378,7 @@ echo 'DIRIGERA_BEARER_TOKEN=...' >> .env
 ```
 
 Then add a `[device].transport = "dirigera"` / `.address = "<device-id>"`
-entry to `device-playlist.toml` and run with `npm run start:env`.
+entry to `device-playlist.toml` and run with `npm start`.
 
 Ecowitt, once you have your application/API key pair from the Ecowitt app:
 
