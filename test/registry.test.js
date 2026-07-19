@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRegistry } from "../src/core/registry/create-registry.js";
-import { upsertRecord } from "../src/core/registry/upsert-record.js";
-import { getRecord } from "../src/core/registry/get-record.js";
-import { listRecords } from "../src/core/registry/list-records.js";
-import { removeRecord } from "../src/core/registry/remove-record.js";
-import { subscribe } from "../src/core/registry/subscribe.js";
-import { recordsAsObject } from "../src/core/registry/records-as-object.js";
+import {
+  createRegistry,
+  upsertRecord,
+  getRecord,
+  listRecords,
+  removeRecord,
+  subscribe,
+  recordsAsObject,
+} from "../src/core/registry.js";
 
 test("upsert then get returns the record", () => {
   const registry = createRegistry();

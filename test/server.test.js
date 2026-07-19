@@ -1,10 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { createRegistry } from "../src/core/registry/create-registry.js";
-import { getRecord } from "../src/core/registry/get-record.js";
-import { handleReport } from "../src/core/server/handle-report.js";
-import { serveStaticPage } from "../src/core/server/serve-static-page.js";
+import { createRegistry, getRecord } from "../src/core/registry.js";
+import { handleReport, serveStaticPage } from "../src/core/server.js";
 
 function fakeRequestWithBody(bodyString) {
   const req = new EventEmitter();

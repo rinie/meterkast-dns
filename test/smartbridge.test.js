@@ -4,9 +4,11 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSmartbridgeResponse } from "../src/adapters/smartbridge/parse-smartbridge-response.js";
-import { fetchSmartbridgeDevices } from "../src/adapters/smartbridge/fetch-smartbridge-devices.js";
-import { matchConfiguredDevices } from "../src/adapters/smartbridge/match-configured-devices.js";
+import {
+  parseSmartbridgeResponse,
+  fetchSmartbridgeDevices,
+  matchConfiguredDevices,
+} from "../src/adapters/smartbridge-adapter.js";
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 

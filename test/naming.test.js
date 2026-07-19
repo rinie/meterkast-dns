@@ -1,9 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { slugify } from "../src/core/naming/slugify.js";
-import { suffixFromIp } from "../src/core/naming/suffix-from-ip.js";
-import { suffixFromCounter } from "../src/core/naming/suffix-from-counter.js";
-import { suggestName } from "../src/core/naming/suggest-name.js";
+import { slugify, suffixFromIp, suffixFromCounter, suggestName } from "../src/core/naming.js";
 
 test("slugify lowercases and strips punctuation", () => {
   assert.equal(slugify("Raspberry Pi!"), "raspberry-pi");

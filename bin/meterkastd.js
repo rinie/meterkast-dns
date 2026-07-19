@@ -1,13 +1,11 @@
 #!/usr/bin/env node
-import { createRegistry } from "../src/core/registry/create-registry.js";
-import { upsertRecord } from "../src/core/registry/upsert-record.js";
-import { readPlaylist } from "../src/core/playlist/read-playlist.js";
-import { flattenDeviceReadings } from "../src/core/playlist/flatten-device-readings.js";
-import { createServer } from "../src/core/server/create-server.js";
-import { runPollingAdapter } from "../src/core/adapters/run-polling-adapter.js";
-import dirigeraAdapter from "../src/adapters/dirigera/dirigera-adapter.js";
-import ecowittAdapter from "../src/adapters/ecowitt/ecowitt-adapter.js";
-import smartbridgeAdapter from "../src/adapters/smartbridge/smartbridge-adapter.js";
+import { createRegistry, upsertRecord } from "../src/core/registry.js";
+import { readPlaylist, flattenDeviceReadings } from "../src/core/playlist.js";
+import { createServer } from "../src/core/server.js";
+import { runPollingAdapter } from "../src/core/run-polling-adapter.js";
+import dirigeraAdapter from "../src/adapters/dirigera-adapter.js";
+import ecowittAdapter from "../src/adapters/ecowitt-adapter.js";
+import smartbridgeAdapter from "../src/adapters/smartbridge-adapter.js";
 
 const playlistPath =
   process.env.METERKAST_PLAYLIST ?? new URL("../device-playlist.toml", import.meta.url);

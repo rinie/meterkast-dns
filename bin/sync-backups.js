@@ -4,7 +4,7 @@
 //   0 3 * * * node --env-file=.env bin/sync-backups.js
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { syncGitBackups } from "../src/core/offsite/sync-git-backups.js";
+import { syncGitBackups } from "../src/core/offsite.js";
 
 const backupDir =
   process.env.METERKAST_BACKUP_DIR ??

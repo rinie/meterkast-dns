@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile, readdir, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writePlaylist } from "../src/core/playlist/write-playlist.js";
-import { readPlaylist } from "../src/core/playlist/read-playlist.js";
-import { formatBackupDate } from "../src/core/playlist/backup/format-backup-date.js";
+import { writePlaylist, readPlaylist } from "../src/core/playlist.js";
+import { formatBackupDate } from "../src/core/playlist-backup.js";
 
 test("write then read round-trips a playlist", async () => {
   const dir = await mkdtemp(join(tmpdir(), "meterkast-"));

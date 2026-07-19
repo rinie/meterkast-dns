@@ -1,9 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRegistry } from "../src/core/registry/create-registry.js";
-import { upsertRecord } from "../src/core/registry/upsert-record.js";
-import { getRecord } from "../src/core/registry/get-record.js";
-import { runPollingAdapter } from "../src/core/adapters/run-polling-adapter.js";
+import { createRegistry, upsertRecord, getRecord } from "../src/core/registry.js";
+import { runPollingAdapter } from "../src/core/run-polling-adapter.js";
 
 test("runPollingAdapter never calls the adapter when no device uses that transport", async () => {
   const registry = createRegistry();
