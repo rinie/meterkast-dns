@@ -18,9 +18,18 @@ mqtt-broker.transport     = "mdns"
 mqtt-broker.address       = "_mqtt._tcp.local"
 mqtt-broker.password_env  = "MQTT_BROKER_PASSWORD"
 
+# Dirigera hub connection config (hostname, bearer token) lives in .env --
+# DIRIGERA_HOSTNAME, DIRIGERA_BEARER_TOKEN -- not here. See README.md
+# "Extending to vendor-hub REST APIs".
+kitchen-lamp.transport = "dirigera"
+kitchen-lamp.address   = "<dirigera-device-id>"
+
 # Nested devices+readings, flattened at load time into
 # kitchen-thermometer-temperature / kitchen-thermometer-battery -- see
-# README.md "Extending to BLE GATT characteristics".
+# README.md "Extending to BLE GATT characteristics". Any bare `key = value`
+# line has to come before this [devices.*] section, not after -- TOML has
+# no way to "return to root" once a [table] header appears; the next bare
+# assignment would nest under the last header instead, silently.
 [devices.kitchen-thermometer]
 transport = "bluetooth"
 address   = "AA:BB:CC:DD:EE:FF"

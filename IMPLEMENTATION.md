@@ -35,6 +35,7 @@ src/
       get-record.js
       list-records.js
       subscribe.js
+      records-as-object.js  # {records: Map} -> {name: record}, for adapters
     naming/
       slugify.js
       suffix-from-ip.js
@@ -72,6 +73,11 @@ src/
   adapters/
     load-adapters.js            # dynamic import() loader
     static-adapter.js           # example/test adapter, no hardware
+    dirigera/
+      dirigera-adapter.js          # polling loop -- network UNVERIFIED, see below
+      fetch-dirigera-devices.js    # the HTTPS call -- also UNVERIFIED against a real hub
+      parse-dirigera-response.js   # status/body -> parsed JSON, or a clear error
+      match-configured-devices.js  # Dirigera's device list x playlist config -> records
 bin/
   meterkastd.js                  # entrypoint: loads the playlist, starts the server
   sync-backups.js                 # cron-friendly: pushes backups/ offsite
@@ -83,6 +89,10 @@ test/
   secrets.test.js
   offsite.test.js
   server.test.js
+  dirigera.test.js
+  fixtures/
+    test-cert.pem                # throwaway self-signed cert for HTTPS tests
+    test-cert.key
   run-all.js                     # see "Testing" below
 public/
   index.html                     # GET / -- device table, live via SSE, links to web-scan
@@ -162,6 +172,14 @@ backups/                         # dated snapshots, written automatically, gitig
   identical file existed briefly when `web-scan.html` was the only page;
   consolidated rather than copy-pasted once a second page needed the exact
   same "read a file, serve as HTML" logic.
+- **Dirigera via plain `node:https`, no client library** — a polling loop,
+  not an event stream: no documented real-time push mechanism, so
+  `dirigera-adapter.js` calls `GET /v1/devices` on an interval (default
+  30s) and diffs against what's configured. `rejectUnauthorized: false` is
+  scoped to that one request (the hub's self-signed cert), never set
+  globally via `NODE_TLS_REJECT_UNAUTHORIZED`. Runs in-process like MQTT
+  and mDNS — plain HTTPS, no native binding, so none of the crash-isolation
+  reasoning below applies to it.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -250,6 +268,24 @@ event specifically (`handle-subscribe.js` sends a named event, not the SSE
 default `message` event, which is easy to get wrong and was checked
 against the actual source rather than assumed).
 
+**The Dirigera adapter is verified further than BLE ever could be, because
+the "hardware" here is just TLS, and TLS is fully fakeable without a real
+hub.** `parse-dirigera-response.js` and `match-configured-devices.js` are
+pure and tested with fixture data. `fetch-dirigera-devices.js` — the actual
+HTTPS request, headers, and `rejectUnauthorized: false` handling — is
+tested against a real local `https.createServer` using a throwaway
+self-signed cert generated for this repo (`test/fixtures/test-cert.*`),
+covering both a successful response and a non-200 rejection. Beyond the
+unit tests: the real daemon was started against a mock Dirigera hub (the
+same self-signed-cert HTTPS server, standing in for the real one) with
+`DIRIGERA_HOSTNAME`/`DIRIGERA_BEARER_TOKEN` actually set, and
+`GET /devices/kitchen-lamp` came back with the hub's live `attributes`
+passed through as `meta` — the full chain, poll to registry to HTTP
+response, exercised for real. The crash-isolation path was verified too:
+with a `dirigera`-transport device configured but no `DIRIGERA_HOSTNAME`
+set, the daemon logs `Dirigera adapter stopped: DIRIGERA_HOSTNAME is not
+set` and keeps serving every other device normally.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
@@ -289,3 +325,15 @@ GitLab, self-hosted — anything `git push` can reach):
 echo 'METERKAST_BACKUP_REMOTE=git@github.com:you/meterkast-dns-backups.git' >> .env
 node --env-file=.env bin/sync-backups.js
 ```
+
+Dirigera, once you have your hub's LAN IP and a bearer token (see
+`GetAccessToken.py`-style pairing flow — press the hub's button, exchange
+for a token, done once):
+
+```sh
+echo 'DIRIGERA_HOSTNAME=192.168.1.183' >> .env
+echo 'DIRIGERA_BEARER_TOKEN=...' >> .env
+```
+
+Then add a `[device].transport = "dirigera"` / `.address = "<device-id>"`
+entry to `device-playlist.toml` and run with `npm run start:env`.

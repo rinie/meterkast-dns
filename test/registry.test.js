@@ -6,6 +6,7 @@ import { getRecord } from "../src/core/registry/get-record.js";
 import { listRecords } from "../src/core/registry/list-records.js";
 import { removeRecord } from "../src/core/registry/remove-record.js";
 import { subscribe } from "../src/core/registry/subscribe.js";
+import { recordsAsObject } from "../src/core/registry/records-as-object.js";
 
 test("upsert then get returns the record", () => {
   const registry = createRegistry();
@@ -44,4 +45,13 @@ test("subscribers are notified on upsert and remove, not after unsubscribing", (
   assert.equal(events.length, 2);
   assert.equal(events[0].type, "upsert");
   assert.equal(events[1].type, "remove");
+});
+
+test("recordsAsObject shapes the registry as {name: record} for an adapter", () => {
+  const registry = createRegistry();
+  upsertRecord(registry, "kitchen-lamp", { transport: "dirigera", address: "dev-1" });
+
+  assert.deepEqual(recordsAsObject(registry), {
+    "kitchen-lamp": { name: "kitchen-lamp", transport: "dirigera", address: "dev-1" },
+  });
 });
