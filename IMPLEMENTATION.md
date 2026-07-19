@@ -69,7 +69,7 @@ test/
   run-all.js                     # see "Testing" below
 public/
   index.html                     # GET / -- device table, live via SSE, links to web-scan
-  web-scan.html                  # WebBLE/WebUSB page -- see README.md
+  web-scan.html                  # WebBLE/WebUSB/WebHID page -- see README.md
 device-playlist.example.toml     # fixture/template, committed
 device-playlist.toml             # the real Use-editable data file, gitignored
 backups/                         # dated snapshots, written automatically, gitignored
@@ -131,15 +131,15 @@ backups/                         # dated snapshots, written automatically, gitig
   on any platform, for anyone, and the security-audit surface it removed
   along with it was real (`npm audit` went from 7 high-severity findings,
   all in `node-gyp`'s own transitive tooling, to 0).
-- **WebBLE/WebUSB — the only BLE/USB path now** — `handleReport` (in
-  `src/core/server.js`) adds a generic `POST /devices/:name`, deliberately
-  transport-agnostic (it stores whatever record it's given, no BLE-specific
-  decode logic in core code) so any future push-based adapter can reuse it.
-  `public/web-scan.html` is a
-  self-contained static page — no build step, no bundler, no framework —
-  and is where the actual `navigator.bluetooth`/`navigator.usb` calls and
-  byte decoding happen, client-side, since those APIs don't exist in Node
-  at all.
+- **WebBLE/WebUSB/WebHID — the only BLE/USB/HID path now** — `handleReport`
+  (in `src/core/server.js`) adds a generic `POST /devices/:name`,
+  deliberately transport-agnostic (it stores whatever record it's given, no
+  transport-specific decode logic in core code) so every browser-based
+  adapter shares it. `public/web-scan.html` is a self-contained static page
+  — no build step, no bundler, no framework — and is where the actual
+  `navigator.bluetooth`/`navigator.usb`/`navigator.hid` calls and byte
+  decoding happen, client-side, since none of those APIs exist in Node at
+  all.
 - **One static-page handler for both pages** — `serveStaticPage` (in
   `src/core/server.js`) takes a filename and serves it from `public/`, used
   for both `GET /` (`index.html`) and `GET /web-scan` (`web-scan.html`). A
@@ -246,10 +246,42 @@ check out; only the picker step is unavailable in this particular browser
 embedding. A real Chrome or Edge tab, opened by a human, does not have this
 gap.
 
+**WebUSB and WebHID were verified for real, one step further than
+Bluetooth/WebUSB above got, then hit a different wall.**
+`connectAndReadUsb` and `connectAndListenHid` in `web-scan.html` were
+code-reviewed against the WebUSB/WebHID specs, and loaded for real in the
+same Chromium browser pane against a real running daemon with a real
+playlist: `GET /web-scan` correctly renders one row per `usb`/`hid`
+playlist entry (`usb-widget`, `game-controller`), `navigator.usb` and
+`navigator.hid` both report as real objects
+(`typeof navigator.usb === "object"`, same for `hid`), and the page loads
+with zero console errors. A synthesized click on the USB row's "Read"
+button — same real-gesture technique documented above, not `.click()` —
+this time produced a different, more concrete result than the earlier
+Bluetooth/WebUSB test: rather than an immediate `NotFoundError`, it opened
+a real native device-chooser window and blocked on it, exactly the
+behavior the spec describes and Electron's own earlier no-picker gap said
+wouldn't happen here. That's progress worth recording precisely rather
+than glossing — this Electron build (42.5.1) does implement a real
+`select-usb-device` picker, unlike whatever was true when the
+Bluetooth/WebUSB section above was last verified. But a picker with no
+real USB device plugged in has nothing to list and nothing to dismiss it
+with from outside the native dialog, so the automated browser session had
+to be recovered by navigating the tab away rather than completing the
+flow. The HID button was deliberately not also clicked, to avoid the same
+stuck state twice. Net honest status: the code path up to and including a
+real OS picker opening is verified; a real USB or HID device plugged in or
+paired is needed to verify anything past that, same as the still-open gap
+for Dirigera-style real-hardware testing elsewhere in this document.
+
 **USB (`udev`), Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and 433MHz/IR
-(RC5/newKaku decoding) adapters remain out of scope entirely** —
-`static-adapter.js` still exists to pin down the plain adapter contract for
-whichever of those gets built next.
+(RC5/newKaku decoding) *native background-daemon* adapters remain out of
+scope entirely** — `static-adapter.js` still exists to pin down the plain
+adapter contract for whichever of those gets built next. WebUSB/WebHID
+above cover the browser-based path for USB and HID (including Bluetooth
+HID) specifically; a native, always-on USB adapter via `udev`/`node-usb`
+is a different, still-unbuilt thing, for the same reason the native BLE
+path (`@abandonware/noble`) was removed rather than kept alongside WebBLE.
 
 **`GET /` (`public/index.html`) was verified end-to-end for real, including
 the live-update path, not just loaded and eyeballed.** With the daemon

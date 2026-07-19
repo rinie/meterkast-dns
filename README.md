@@ -424,6 +424,61 @@ design makes is explicit: give up the always-on background daemon for
 BLE/USB specifically, in exchange for zero native dependencies, anywhere,
 for anyone.
 
+### Extending to WebUSB and WebHID (raw USB, and HID over either USB or Bluetooth)
+
+Same shape as WebBLE above -- `navigator.usb`/`navigator.hid` in the
+`web-scan.html` page, `POST /devices/:name` to cross back into the
+registry -- but two different honest limits, for two different reasons.
+
+**Raw USB has no standardized interface to resolve a name against.** BLE's
+GATT has published, numbered services and characteristics (Health
+Thermometer is always `0x2A1C`, on every conforming device); a vendor's raw
+USB interface has no such registry -- the interface number, endpoint
+number, and byte layout are whatever that device's own firmware author
+chose. So a `usb`-transport entry names `interfaceNumber`/`endpointNumber`
+explicitly instead of a resolved name:
+
+```toml
+usb-widget.transport       = "usb"
+usb-widget.address         = "1a86:7523"   # vendorId:productId, hex
+usb-widget.interfaceNumber = 0
+usb-widget.endpointNumber  = 1
+```
+
+And unlike GATT notifications, raw USB has no generic push mechanism this
+code can subscribe to -- so a click performs one `transferIn` read and
+reports it, rather than starting a live subscription. Read again by
+clicking again. The bytes themselves come back as hex, the same honest
+fallback as LIRC's raw pulse capture or Smartbridge's opaque ciphertext:
+reporting real bytes this code can't interpret beats guessing at a decoding
+it has no basis for.
+
+**WebHID is the only way a browser reaches a *Bluetooth* HID device at
+all.** Web Bluetooth's own specification excludes the standard
+HID-over-GATT service from `requestDevice()` on purpose (a long-standing,
+deliberate security exclusion, not an oversight) -- so "BLE HID" from a
+browser never means Web Bluetooth. It means WebHID talking to whatever the
+OS already exposed as a HID node, because the OS's own HID driver claims
+the device the moment it's paired, over USB or Bluetooth identically, and
+WebHID sits on top of that OS-level abstraction rather than either
+transport directly. One `address` shape covers both cases -- there's
+nothing in a `hid`-transport entry that says which transport the device
+actually uses, because from here it doesn't matter:
+
+```toml
+game-controller.transport = "hid"
+game-controller.address   = "0079:0011"   # vendorId:productId, hex
+```
+
+Unlike raw USB, HID does have a generic push mechanism -- the
+`inputreport` event -- so a `hid`-transport entry behaves like the BLE
+section: one click to connect, live updates after that with no further
+click. But HID report *bytes* are exactly as unstandardized as raw USB's
+(a report's actual meaning depends on that specific device's own HID
+report descriptor, which varies device to device), so they're reported the
+same way: hex, keyed by `reportId`, the same honest fallback rather than a
+guessed decoding.
+
 ### Extending to vendor-hub REST APIs (Dirigera, and Matter by proxy)
 
 §1 named the shape a working resolver takes for smart-home devices: a
