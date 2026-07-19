@@ -2,23 +2,46 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>meterkast-dns -- WebBLE/WebUSB scan</title>
+<title>meterkast-dns -- WebBLE/WebUSB/WebHID scan</title>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
   button { font-size: 1rem; padding: 0.5rem 1rem; margin: 0.25rem 0; }
   .row { display: flex; align-items: center; gap: 0.75rem; margin: 0.5rem 0; }
   .status { font-family: monospace; color: #555; }
+  h2 { margin-top: 2rem; }
 </style>
 </head>
 <body>
-<h1>meterkast-dns: WebBLE scan</h1>
+<h1>meterkast-dns: browser device scan</h1>
 <p>
-  Requires Chrome or Edge (Web Bluetooth is not implemented in Firefox or
-  Safari) and a device already listed in the playlist with a
-  <code>service</code>/<code>characteristic</code> pair -- see README.md
-  "Extending to BLE GATT characteristics".
+  Requires Chrome or Edge (Web Bluetooth, WebUSB, and WebHID are not
+  implemented in Firefox or Safari). Each section below lists playlist
+  entries for its transport -- see README.md "Extending to BLE GATT
+  characteristics" and "Extending to WebUSB and WebHID".
 </p>
-<div id="targets">Loading playlist...</div>
+
+<h2>Bluetooth (GATT)</h2>
+<div id="ble-targets">Loading playlist...</div>
+
+<h2>USB</h2>
+<p>
+  Raw WebUSB -- no standardized interface to resolve a name against (unlike
+  BLE GATT), so each entry names its own <code>interfaceNumber</code> and
+  <code>endpointNumber</code> explicitly. One click performs one
+  <code>transferIn</code> read; there's no generic push mechanism for raw
+  USB, so re-click to read again.
+</p>
+<div id="usb-targets">Loading playlist...</div>
+
+<h2>HID (USB or Bluetooth)</h2>
+<p>
+  WebHID reaches HID-class devices regardless of transport -- this is also
+  the only way a browser can reach a <em>Bluetooth</em> HID device at all,
+  since Web Bluetooth deliberately blocks the standard HID-over-GATT
+  service. Live updates flow via the <code>inputreport</code> event, same
+  one-click-then-live-updates shape as the BLE section.
+</p>
+<div id="hid-targets">Loading playlist...</div>
 
 <script type="module">
 // Mirrors src/adapters/ble-gatt/known-services.js and
@@ -72,6 +95,25 @@ function decodeCharacteristic(characteristicName, view) {
   return null; // unknown/proprietary -- nothing to decode against
 }
 
+// address for usb/hid entries is "vvvv:pppp" -- hex vendorId:productId, the
+// same pair the OS device manager and `lsusb` already show, chosen for the
+// same reason a MAC address is the Gutenberg value for a bluetooth entry:
+// it's what the transport actually resolves to, not a name anyone chose.
+function parseVendorProductId(address) {
+  const [vendorHex, productHex] = address.split(":");
+  return { vendorId: parseInt(vendorHex, 16), productId: parseInt(productHex, 16) };
+}
+
+// USB and HID hand back raw bytes with no standardized meaning across
+// devices (unlike BLE's named GATT characteristics) -- reporting them as
+// hex is the honest fallback, the same pattern as LIRC's raw pulse capture
+// or Smartbridge's opaque ciphertext: pass through what's real rather than
+// guess at a decoding this code has no basis for.
+function bytesToHex(dataView) {
+  const bytes = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 async function reportReading(name, fields) {
   const res = await fetch(`/devices/${encodeURIComponent(name)}`, {
     method: "POST",
@@ -82,7 +124,7 @@ async function reportReading(name, fields) {
   return res.json();
 }
 
-async function connectAndRead(target, statusEl) {
+async function connectAndReadBle(target, statusEl) {
   statusEl.textContent = "requesting device...";
   const serviceUuid = resolveServiceUuid(target.service);
   const characteristicUuid = resolveCharacteristicUuid(target.characteristic);
@@ -121,38 +163,141 @@ async function connectAndRead(target, statusEl) {
   statusEl.textContent += " -- subscribed to live updates";
 }
 
-async function main() {
-  const targetsEl = document.getElementById("targets");
-  const res = await fetch("/devices");
-  const devices = await res.json();
-  const targets = devices.filter((d) => d.transport === "bluetooth" && d.service && d.characteristic);
+// One-shot: requestDevice -> open -> claimInterface -> transferIn. No
+// generic push mechanism exists for raw USB the way BLE notifications or
+// HID input reports do, so this reads once per click rather than
+// subscribing -- an honest limit of the transport, not a missing feature.
+async function connectAndReadUsb(target, statusEl) {
+  statusEl.textContent = "requesting device...";
+  const { vendorId, productId } = parseVendorProductId(target.address);
+  const device = await navigator.usb.requestDevice({ filters: [{ vendorId, productId }] });
 
+  statusEl.textContent = "opening...";
+  await device.open();
+  if (device.configuration === null) await device.selectConfiguration(1);
+  const interfaceNumber = target.interfaceNumber ?? 0;
+  await device.claimInterface(interfaceNumber);
+
+  const endpointNumber = target.endpointNumber ?? 1;
+  const transferLength = target.transferLength ?? 64;
+  const result = await device.transferIn(endpointNumber, transferLength);
+  const hex = bytesToHex(result.data);
+  await reportReading(target.name, {
+    transport: target.transport,
+    address: target.address,
+    meta: { reportHex: hex, byteLength: result.data.byteLength },
+  });
+  statusEl.textContent = `reported at ${new Date().toLocaleTimeString()}: ${hex}`;
+}
+
+// requestDevice -> open -> subscribe to inputreport. This is the only path
+// a browser has to a Bluetooth HID device at all (Web Bluetooth excludes
+// the HID-over-GATT service from its own API on purpose) -- WebHID talks
+// to whatever the OS already exposed as a HID node, USB or Bluetooth,
+// identically. Report bytes are hex, same honest-fallback reasoning as USB:
+// a report's actual meaning depends on that device's own report descriptor,
+// which this code doesn't have.
+async function connectAndListenHid(target, statusEl) {
+  statusEl.textContent = "requesting device...";
+  const { vendorId, productId } = parseVendorProductId(target.address);
+  const [device] = await navigator.hid.requestDevice({ filters: [{ vendorId, productId }] });
+  if (!device) throw new Error("no device selected");
+
+  statusEl.textContent = "opening...";
+  await device.open();
+
+  const report = async (reportId, data) => {
+    const hex = bytesToHex(data);
+    await reportReading(target.name, {
+      transport: target.transport,
+      address: target.address,
+      meta: { reportId, reportHex: hex, byteLength: data.byteLength },
+    });
+    statusEl.textContent = `reported at ${new Date().toLocaleTimeString()}: reportId=${reportId} ${hex}`;
+  };
+
+  device.addEventListener("inputreport", (event) => {
+    report(event.reportId, event.data).catch((error) => {
+      statusEl.textContent = `ERROR: ${error.message}`;
+    });
+  });
+  statusEl.textContent = "connected -- waiting for input reports";
+}
+
+function renderTargets(containerEl, targets, emptyMessage, label, connect) {
   if (targets.length === 0) {
-    targetsEl.textContent = "No bluetooth devices with a service/characteristic found in the playlist.";
+    containerEl.textContent = emptyMessage;
     return;
   }
-
-  targetsEl.innerHTML = "";
+  containerEl.innerHTML = "";
   for (const target of targets) {
     const row = document.createElement("div");
     row.className = "row";
     const button = document.createElement("button");
-    button.textContent = `Connect: ${target.name}`;
+    button.textContent = `${label}: ${target.name}`;
     const status = document.createElement("span");
     status.className = "status";
-    status.textContent = `${target.service} / ${target.characteristic}`;
+    status.textContent = target.address;
     button.addEventListener("click", () => {
-      connectAndRead(target, status).catch((error) => {
+      connect(target, status).catch((error) => {
         status.textContent = `ERROR: ${error.name} - ${error.message}`;
       });
     });
     row.append(button, status);
-    targetsEl.append(row);
+    containerEl.append(row);
+  }
+}
+
+async function main() {
+  const bleTargetsEl = document.getElementById("ble-targets");
+  const usbTargetsEl = document.getElementById("usb-targets");
+  const hidTargetsEl = document.getElementById("hid-targets");
+
+  const res = await fetch("/devices");
+  const devices = await res.json();
+
+  if (!navigator.bluetooth) {
+    bleTargetsEl.textContent = "Web Bluetooth is not available in this browser.";
+  } else {
+    const bleTargets = devices.filter((d) => d.transport === "bluetooth" && d.service && d.characteristic);
+    renderTargets(
+      bleTargetsEl,
+      bleTargets,
+      "No bluetooth devices with a service/characteristic found in the playlist.",
+      "Connect",
+      connectAndReadBle,
+    );
+  }
+
+  if (!navigator.usb) {
+    usbTargetsEl.textContent = "WebUSB is not available in this browser.";
+  } else {
+    const usbTargets = devices.filter((d) => d.transport === "usb");
+    renderTargets(
+      usbTargetsEl,
+      usbTargets,
+      "No usb-transport devices found in the playlist.",
+      "Read",
+      connectAndReadUsb,
+    );
+  }
+
+  if (!navigator.hid) {
+    hidTargetsEl.textContent = "WebHID is not available in this browser.";
+  } else {
+    const hidTargets = devices.filter((d) => d.transport === "hid");
+    renderTargets(
+      hidTargetsEl,
+      hidTargets,
+      "No hid-transport devices found in the playlist.",
+      "Connect",
+      connectAndListenHid,
+    );
   }
 }
 
 main().catch((error) => {
-  document.getElementById("targets").textContent = `Failed to load playlist: ${error.message}`;
+  document.getElementById("ble-targets").textContent = `Failed to load playlist: ${error.message}`;
 });
 </script>
 </body>

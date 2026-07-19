@@ -38,6 +38,23 @@ weather-station.address   = "<device-mac>"
 kaku-plug.transport = "smartbridge"
 kaku-plug.address   = "<ics2000-device-id>"
 
+# Raw WebUSB -- address is "vvvv:pppp" (hex vendorId:productId, the same
+# pair lsusb/Device Manager show). No standard interface to resolve a name
+# against the way BLE GATT has, so interfaceNumber/endpointNumber are named
+# explicitly. See README.md "Extending to WebUSB and WebHID".
+usb-widget.transport      = "usb"
+usb-widget.address        = "1a86:7523"
+usb-widget.interfaceNumber = 0
+usb-widget.endpointNumber  = 1
+
+# WebHID -- same "vvvv:pppp" address shape as usb-widget above, but reached
+# via navigator.hid instead of navigator.usb. This is also how a *Bluetooth*
+# HID device is reached from a browser at all, since Web Bluetooth excludes
+# the HID-over-GATT service on purpose -- see README.md "Extending to
+# WebUSB and WebHID".
+game-controller.transport = "hid"
+game-controller.address   = "0079:0011"
+
 # Nested devices+readings, flattened at load time into
 # kitchen-thermometer-temperature / kitchen-thermometer-battery -- see
 # README.md "Extending to BLE GATT characteristics". Any bare `key = value`
