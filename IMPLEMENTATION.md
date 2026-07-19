@@ -301,43 +301,36 @@ event specifically (`handle-subscribe.js` sends a named event, not the SSE
 default `message` event, which is easy to get wrong and was checked
 against the actual source rather than assumed).
 
-**The Dirigera adapter is verified further than BLE ever could be, because
-the "hardware" here is just TLS, and TLS is fully fakeable without a real
-hub.** `parse-dirigera-response.js` and `match-configured-devices.js` are
-pure and tested with fixture data. `fetch-dirigera-devices.js` — the actual
-HTTPS request, headers, and `rejectUnauthorized: false` handling — is
-tested against a real local `https.createServer` using a throwaway
-self-signed cert generated for this repo (`test/fixtures/test-cert.*`),
-covering both a successful response and a non-200 rejection. Beyond the
-unit tests: the real daemon was started against a mock Dirigera hub (the
-same self-signed-cert HTTPS server, standing in for the real one) with
-`DIRIGERA_HOSTNAME`/`DIRIGERA_BEARER_TOKEN` actually set, and
-`GET /devices/kitchen-lamp` came back with the hub's live `attributes`
-passed through as `meta` — the full chain, poll to registry to HTTP
-response, exercised for real. The crash-isolation path was verified too:
-with a `dirigera`-transport device configured but no `DIRIGERA_HOSTNAME`
-set, the daemon logs `Dirigera adapter stopped: DIRIGERA_HOSTNAME is not
-set` and keeps serving every other device normally.
-
-**Ecowitt and Smartbridge went one step further than Dirigera: verified
-against the real cloud APIs with real credentials, not just a local
-mock.** `parse-*-response.js` and (for Smartbridge) `match-configured-devices.js`
-are pure and tested against fixtures captured from real responses
-(`test/fixtures/ecowitt-real-time-response.json`,
+**All three of Dirigera, Ecowitt, and Smartbridge are now verified against
+the real service, not just a local mock — the same tier for all three, not
+a gap between them.** `parse-*-response.js` and `match-configured-devices.js`
+(Dirigera, Smartbridge) are pure and tested against fixtures — Dirigera's
+with hand-built data, Ecowitt's and Smartbridge's captured from real
+responses (`test/fixtures/ecowitt-real-time-response.json`,
 `smartbridge-sync-response.json` — device/home IDs genericized before
-committing, the response shape itself is real). `fetch-ecowitt-reading.js`
-and `fetch-smartbridge-devices.js` are each tested against a local
-self-signed mock server, same pattern as Dirigera. Beyond that: the real
-daemon was started with real `.env` credentials pointed at the real
-`api.ecowitt.net` and `trustsmartcloud2.com`, and `GET /devices/weather-station`
-/ `GET /devices/kaku-plug` came back with genuinely live data — real
-outdoor/indoor sensor readings for Ecowitt, and the real device's
-`version_status`/`version_data`/encrypted `data` for Smartbridge, full
-poll-to-registry-to-HTTP chain against production services. The Smartbridge
+committing, the response shape itself is real). Each `fetch-*.js` — the
+actual HTTPS request, headers, and TLS handling — is additionally tested
+against a local self-signed mock server (`test/fixtures/test-cert.*`),
+covering both a successful response and a rejection.
+
+Beyond the unit tests, each adapter was run for real, end to end, against
+production: the real daemon started with real `.env` credentials, polling
+the real service, folding a genuinely live reading back into the registry
+and out through `GET /devices/:name`. For Dirigera specifically: initially
+verified only against a local mock hub standing in for the real one (the
+honest state this section originally described); later re-verified against
+the real hub at its real LAN IP with the real bearer token found in
+`dirigeraConfig.js` — `GET /devices/kitchen-light-2` came back with that
+light's actual `isOn`/`lightLevel`/`serialNumber`, matching the shape
+`ListDevices.js` had already shown it would. For Ecowitt and Smartbridge:
+`GET /devices/weather-station` / `GET /devices/kaku-plug` came back with
+real outdoor/indoor sensor readings and the real device's
+`version_status`/`version_data`/encrypted `data`, against
+`api.ecowitt.net` and `trustsmartcloud2.com` in production. The Smartbridge
 encryption finding is confirmed this way too, not assumed: `data` and
 `status` came back as genuine base64-looking ciphertext with no accompanying
-documentation on decrypting them. Crash isolation was verified for both:
-misconfigured with no credentials set, each adapter logs a clear
+documentation on decrypting them. Crash isolation was verified for all
+three: misconfigured with no credentials set, each adapter logs a clear
 `<Name> adapter stopped: Missing required environment variable: ...` and
 the daemon keeps serving every other device normally.
 
