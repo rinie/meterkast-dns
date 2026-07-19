@@ -68,7 +68,7 @@ src/
       handle-get.js             # GET /devices/:name
       handle-subscribe.js       # GET /events (SSE)
       handle-report.js          # POST /devices/:name -- generic write path
-      serve-web-scan-page.js    # GET /web-scan -- serves public/web-scan.html
+      serve-static-page.js      # GET / and GET /web-scan -- serves public/*.html
   adapters/
     load-adapters.js            # dynamic import() loader
     static-adapter.js           # example/test adapter, no hardware
@@ -85,6 +85,7 @@ test/
   server.test.js
   run-all.js                     # see "Testing" below
 public/
+  index.html                     # GET / -- device table, live via SSE, links to web-scan
   web-scan.html                  # WebBLE/WebUSB page -- see README.md
 device-playlist.example.toml     # fixture/template, committed
 device-playlist.toml             # the real Use-editable data file, gitignored
@@ -152,9 +153,15 @@ backups/                         # dated snapshots, written automatically, gitig
   whatever record it's given, no BLE-specific decode logic in core code) so
   any future push-based adapter can reuse it. `public/web-scan.html` is a
   self-contained static page — no build step, no bundler, no framework —
-  served by `serve-web-scan-page.js`, and is where the actual
-  `navigator.bluetooth`/`navigator.usb` calls and byte decoding happen,
-  client-side, since those APIs don't exist in Node at all.
+  and is where the actual `navigator.bluetooth`/`navigator.usb` calls and
+  byte decoding happen, client-side, since those APIs don't exist in Node
+  at all.
+- **One static-page handler for both pages** — `serve-static-page.js`
+  takes a filename and serves it from `public/`, used for both `GET /`
+  (`index.html`) and `GET /web-scan` (`web-scan.html`). A second nearly
+  identical file existed briefly when `web-scan.html` was the only page;
+  consolidated rather than copy-pasted once a second page needed the exact
+  same "read a file, serve as HTML" logic.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -198,7 +205,7 @@ exists yet. `bin/sync-backups.js` runs separately (intended for cron) and
 pushes `backups/` to whatever private git remote you've configured.
 
 **The WebBLE/WebUSB path is real and tested, verified inside an actual
-browser, not just Node.** `handle-report.js` and `serve-web-scan-page.js`
+browser, not just Node.** `handle-report.js` and `serve-static-page.js`
 have unit tests (a fake request/response, no server needed). End-to-end:
 the daemon was started for real, `GET /web-scan` was loaded in an actual
 Chromium browser pane (Electron 42.5, confirmed via `navigator.userAgent`),
@@ -234,6 +241,15 @@ gap.
 `static-adapter.js` still exists to pin down the plain adapter contract for
 whichever of those gets built next.
 
+**`GET /` (`public/index.html`) was verified end-to-end for real, including
+the live-update path, not just loaded and eyeballed.** With the daemon
+running and the page open, a `POST /devices/kitchen-thermometer-battery`
+sent from a separate terminal appeared in the table with no page reload —
+confirming the SSE wiring end to end: the client listens for the `change`
+event specifically (`handle-subscribe.js` sends a named event, not the SSE
+default `message` event, which is easy to get wrong and was checked
+against the actual source rather than assumed).
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
@@ -253,15 +269,16 @@ accordingly.
 npm install
 npm test
 cp device-playlist.example.toml device-playlist.toml   # your real, gitignored copy
-node --env-file=.env bin/meterkastd.js   # --env-file is optional if you have no secrets yet
+npm start                       # or: npm run start:env, if you have a .env with secrets
 curl http://localhost:8420/devices                     # PORT=8420 by default
 curl http://localhost:8420/devices/myHpPrinter
 curl -N http://localhost:8420/events                    # streams SSE change events
 ```
 
-BLE/USB, in Chrome or Edge (not Firefox or Safari) — no compiler, no
-`node-gyp`, no prerequisites of any kind beyond the browser itself. With
-the daemon running, open `http://localhost:8420/web-scan`; it lists every
+Open `http://localhost:8420/` for the device table (live via SSE) and a
+link to the scan page. BLE/USB itself works in Chrome or Edge (not Firefox
+or Safari) — no compiler, no `node-gyp`, no prerequisites of any kind
+beyond the browser itself: `http://localhost:8420/web-scan` lists every
 bluetooth-transport playlist entry with a `service`/`characteristic` pair
 and lets you connect and read each one for real.
 
