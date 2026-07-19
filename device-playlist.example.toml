@@ -24,6 +24,20 @@ mqtt-broker.password_env  = "MQTT_BROKER_PASSWORD"
 kitchen-lamp.transport = "dirigera"
 kitchen-lamp.address   = "<dirigera-device-id>"
 
+# Ecowitt is a cloud API (ECOWITT_APPLICATION_KEY, ECOWITT_API_KEY in
+# .env), not a local hub like Dirigera -- see README.md "Extending to
+# cloud vendor APIs" for why that's a real, honestly-stated difference.
+weather-station.transport = "ecowitt"
+weather-station.address   = "<device-mac>"
+
+# Smartbridge/ICS2000 (KlikAanKlikUit's cloud, SMARTBRIDGE_EMAIL /
+# SMARTBRIDGE_MAC / SMARTBRIDGE_PASSWORD_HASH in .env) -- meta carries
+# version_status/version_data as real change-detection signals; the
+# device's actual state (data/status) is encrypted ciphertext with no
+# known decryption, passed through opaque rather than guessed at.
+kaku-plug.transport = "smartbridge"
+kaku-plug.address   = "<ics2000-device-id>"
+
 # Nested devices+readings, flattened at load time into
 # kitchen-thermometer-temperature / kitchen-thermometer-battery -- see
 # README.md "Extending to BLE GATT characteristics". Any bare `key = value`

@@ -55,6 +55,8 @@ src/
         is-valid-toml.js           # the "validated" gate
     secrets/
       resolve-secret-env.js    # env var name -> its value, or a clear error
+    adapters/
+      run-polling-adapter.js   # shared wiring: check transport, run, upsert
     offsite/
       sync-git-backups.js      # orchestrates: init if needed, commit, push
       run-git.js                # execFile("git", args, {cwd}) wrapper
@@ -74,10 +76,19 @@ src/
     load-adapters.js            # dynamic import() loader
     static-adapter.js           # example/test adapter, no hardware
     dirigera/
-      dirigera-adapter.js          # polling loop -- network UNVERIFIED, see below
-      fetch-dirigera-devices.js    # the HTTPS call -- also UNVERIFIED against a real hub
+      dirigera-adapter.js          # polling loop -- real hub UNVERIFIED, see below
+      fetch-dirigera-devices.js    # the HTTPS call, tested against a local mock
       parse-dirigera-response.js   # status/body -> parsed JSON, or a clear error
       match-configured-devices.js  # Dirigera's device list x playlist config -> records
+    ecowitt/
+      ecowitt-adapter.js           # polling loop, one HTTPS call per device
+      fetch-ecowitt-reading.js     # the HTTPS call -- verified against the real API
+      parse-ecowitt-response.js    # HTTP status + API-level code -> .data, or a clear error
+    smartbridge/
+      smartbridge-adapter.js       # polling loop, one bulk HTTPS call
+      fetch-smartbridge-devices.js # the HTTPS call -- verified against the real API
+      parse-smartbridge-response.js  # status/body -> parsed device array
+      match-configured-devices.js  # matches by id; encrypted data/status pass through as-is
 bin/
   meterkastd.js                  # entrypoint: loads the playlist, starts the server
   sync-backups.js                 # cron-friendly: pushes backups/ offsite
@@ -90,9 +101,14 @@ test/
   offsite.test.js
   server.test.js
   dirigera.test.js
+  ecowitt.test.js
+  smartbridge.test.js
+  run-polling-adapter.test.js
   fixtures/
-    test-cert.pem                # throwaway self-signed cert for HTTPS tests
+    test-cert.pem                    # throwaway self-signed cert for HTTPS tests
     test-cert.key
+    ecowitt-real-time-response.json  # real response shape, captured live
+    smartbridge-sync-response.json   # real response shape, IDs genericized
   run-all.js                     # see "Testing" below
 public/
   index.html                     # GET / -- device table, live via SSE, links to web-scan
@@ -180,6 +196,23 @@ backups/                         # dated snapshots, written automatically, gitig
   globally via `NODE_TLS_REJECT_UNAUTHORIZED`. Runs in-process like MQTT
   and mDNS — plain HTTPS, no native binding, so none of the crash-isolation
   reasoning below applies to it.
+- **Ecowitt and Smartbridge, same shape, real public certs** — same plain
+  `node:https` polling pattern as Dirigera, but `rejectUnauthorized`
+  defaults to `true`: these are real internet-facing cloud APIs with
+  properly CA-signed certificates, not a local hub with a self-signed one,
+  so there's no legitimate reason to relax verification. Ecowitt polls once
+  per configured device (`real_time` takes one `mac` at a time, unlike
+  Dirigera's single bulk fetch) and catches a single station's fetch
+  failure without aborting the whole cycle, since other stations should
+  keep reporting even if one is offline. Smartbridge polls once per cycle
+  for every device on the account, same bulk shape as Dirigera.
+- **One shared function runs every polling adapter** —
+  `run-polling-adapter.js` checks whether the playlist configured any
+  device for a transport, runs the adapter only if so, and folds every
+  yielded reading back into the registry. Extracted once a third adapter
+  needed the identical wiring `bin/meterkastd.js` had been repeating for
+  Dirigera and Ecowitt — same reasoning as consolidating
+  `serve-static-page.js` once a second page needed it.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -286,6 +319,28 @@ with a `dirigera`-transport device configured but no `DIRIGERA_HOSTNAME`
 set, the daemon logs `Dirigera adapter stopped: DIRIGERA_HOSTNAME is not
 set` and keeps serving every other device normally.
 
+**Ecowitt and Smartbridge went one step further than Dirigera: verified
+against the real cloud APIs with real credentials, not just a local
+mock.** `parse-*-response.js` and (for Smartbridge) `match-configured-devices.js`
+are pure and tested against fixtures captured from real responses
+(`test/fixtures/ecowitt-real-time-response.json`,
+`smartbridge-sync-response.json` — device/home IDs genericized before
+committing, the response shape itself is real). `fetch-ecowitt-reading.js`
+and `fetch-smartbridge-devices.js` are each tested against a local
+self-signed mock server, same pattern as Dirigera. Beyond that: the real
+daemon was started with real `.env` credentials pointed at the real
+`api.ecowitt.net` and `trustsmartcloud2.com`, and `GET /devices/weather-station`
+/ `GET /devices/kaku-plug` came back with genuinely live data — real
+outdoor/indoor sensor readings for Ecowitt, and the real device's
+`version_status`/`version_data`/encrypted `data` for Smartbridge, full
+poll-to-registry-to-HTTP chain against production services. The Smartbridge
+encryption finding is confirmed this way too, not assumed: `data` and
+`status` came back as genuine base64-looking ciphertext with no accompanying
+documentation on decrypting them. Crash isolation was verified for both:
+misconfigured with no credentials set, each adapter logs a clear
+`<Name> adapter stopped: Missing required environment variable: ...` and
+the daemon keeps serving every other device normally.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
@@ -337,3 +392,28 @@ echo 'DIRIGERA_BEARER_TOKEN=...' >> .env
 
 Then add a `[device].transport = "dirigera"` / `.address = "<device-id>"`
 entry to `device-playlist.toml` and run with `npm run start:env`.
+
+Ecowitt, once you have your application/API key pair from the Ecowitt app:
+
+```sh
+echo 'ECOWITT_APPLICATION_KEY=...' >> .env
+echo 'ECOWITT_API_KEY=...' >> .env
+```
+
+`weather-station.transport = "ecowitt"` / `.address = "<device-mac>"` in
+the playlist.
+
+Smartbridge/ICS2000, once you have your KlikAanKlikUit account email, the
+hub's own MAC, and your account password hash:
+
+```sh
+echo 'SMARTBRIDGE_EMAIL=you@example.com' >> .env
+echo 'SMARTBRIDGE_MAC=...' >> .env
+echo 'SMARTBRIDGE_PASSWORD_HASH=...' >> .env
+```
+
+`kaku-plug.transport = "smartbridge"` / `.address = "<ics2000-device-id>"`
+in the playlist. `meta` will carry `version_status`/`version_data` as
+real, usable change-detection signals; `encrypted_data`/`encrypted_status`
+come through as opaque ciphertext — see README.md "Extending to cloud
+vendor APIs" for why.

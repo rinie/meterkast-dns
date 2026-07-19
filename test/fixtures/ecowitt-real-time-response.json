@@ -1,0 +1,19 @@
+{
+  "code": 0,
+  "msg": "success",
+  "time": "1784470863",
+  "data": {
+    "outdoor": {
+      "temperature": { "time": "1784470803", "unit": "ºF", "value": "72.7" },
+      "feels_like": { "time": "1784470803", "unit": "ºF", "value": "72.7" },
+      "humidity": { "time": "1784470803", "unit": "%", "value": "46" }
+    },
+    "indoor": {
+      "temperature": { "time": "1784470803", "unit": "ºF", "value": "76.5" },
+      "humidity": { "time": "1784470803", "unit": "%", "value": "47" }
+    },
+    "battery": {
+      "t_rh_p_sensor": { "time": "1784470803", "unit": "", "value": "0" }
+    }
+  }
+}
