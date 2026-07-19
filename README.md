@@ -369,6 +369,55 @@ actually implemented here" for exactly which parts are real and tested
 (the UUID resolvers, the decoders, the nested-to-flat playlist loading) and
 which one remains unverified against real hardware (the actual BLE scan).
 
+### WebBLE/WebUSB as the alternative to a native binding
+
+`@abandonware/noble` needs `node-gyp` — a real C++ compiler and Python —
+to build at all, on every platform, not just Windows: it ships no prebuilt
+binary in its npm package (confirmed by extracting the actual tarball; no
+`prebuilds/` directory), so `node-gyp-build` always falls through to
+compiling from source. On a machine where installing a compiler isn't an
+option, that's a hard stop.
+
+`navigator.bluetooth` and `navigator.usb` sidestep the problem entirely —
+no native addon, no compiler, no `node-gyp`, because the browser already
+ships a working BLE/USB stack and exposes it directly to JavaScript. This
+is the same move Chrome, the browser, and the router already made
+correctly elsewhere in this series: stay close to what's already there
+(bytes, an existing stack) instead of adding a semantic-heavy ceremony on
+top of it. It's a smaller-scale version of the pattern from
+[The Gutenberg/Semantic Model](https://rinie.github.io/2026/05/14/gutenberg-vs-semantic/)
+§10 — Java and .NET tried to solve portability by adding more semantics
+(bytecode, assemblies, reflection); the browser vendors solved BLE/USB
+portability by exposing the bytes directly and letting the page decide what
+they mean, the same "Gutenberg guys" move as UTF-8 and git.
+
+**The shape**: since `navigator.bluetooth`/`navigator.usb` only exist in a
+browser tab's JS, never in Node, the always-on background-daemon model for
+BLE/USB specifically goes away — a browser tab has to be open and connected
+for readings to flow. A new generic write endpoint, `POST /devices/:name`,
+lets that browser page push a reading across the process boundary into the
+registry; the page itself does the actual `requestDevice()` → `connect()`
+→ `getCharacteristic()` → `readValue()` flow and decodes the bytes
+client-side (a small, deliberately duplicated mirror of the Node decoders —
+`Buffer` isn't available in a browser, `DataView` is what Web Bluetooth
+hands back) before posting `{transport, address, service, characteristic,
+meta}` — the same shape the native adapter produces, so `GET /devices/:name`
+looks identical regardless of which path produced the reading.
+
+**The pairing dialog is still the one-time bootstrap ceremony** already
+described above — Chrome's device picker instead of an OS pairing prompt.
+`characteristic.startNotifications()` keeps live updates flowing after that
+first connect without any further click.
+
+**Real, worth stating plainly: Chromium only.** Firefox and Safari have
+both declined to implement Web Bluetooth/WebUSB, citing privacy and
+fingerprinting concerns. Chrome or Edge, nothing else.
+
+Native noble stays documented and implemented as the other option — for a
+machine that already has a working toolchain, it doesn't need a browser tab
+open at all. Which one to use is a per-machine choice, not a decision this
+design makes for you.
+
 ### What already exists and should be reused, not reinvented
 
 This is a composition problem more than an invention problem — most of the
