@@ -35,6 +35,7 @@ src/
       get-record.js
       list-records.js
       subscribe.js
+      records-as-object.js  # {records: Map} -> {name: record}, for adapters
     naming/
       slugify.js
       suffix-from-ip.js
@@ -71,7 +72,7 @@ src/
     load-adapters.js            # dynamic import() loader
     static-adapter.js           # example/test adapter, no hardware
     ble-gatt/
-      ble-gatt-adapter.js          # noble wiring -- UNVERIFIED, see below
+      ble-gatt-adapter.js          # noble wiring -- scan/discover UNVERIFIED, see below
       read-device-readings.js      # connect/read/decode/disconnect one device
       group-readings-by-address.js # flat records -> Map<address, readings[]>
       create-async-queue.js        # bridges noble's events to the async generator
@@ -85,8 +86,10 @@ src/
       decode-weight-measurement.js       # packed weight+flags, per spec
       decode-battery-level.js            # uint8 percentage
 bin/
-  meterkastd.js                  # entrypoint: loads the playlist, starts the server
+  meterkastd.js                  # entrypoint: loads the playlist, starts the server,
+                                  # runs the BLE GATT adapter if any device needs it
   sync-backups.js                 # cron-friendly: pushes backups/ offsite
+  scan-ble.js                     # standalone: is noble seeing anything at all?
 test/
   registry.test.js
   naming.test.js
@@ -224,6 +227,21 @@ Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and 433MHz/IR (RC5/newKaku
 decoding) adapters remain out of scope entirely — `static-adapter.js`
 still exists to pin down the plain adapter contract for those.
 
+**The adapter is wired into `bin/meterkastd.js`, and the wiring itself is
+verified — just not the scan behind it.** On startup, if any playlist entry
+has `transport = "bluetooth"`, the daemon runs `bleGattAdapter` in the
+background and folds every reading it yields back into the registry via
+`upsertRecord`, so a live BLE value updates the same record the HTTP API
+and SSE stream already serve. Two things about this were actually run and
+confirmed, not just written: with no bluetooth devices in the playlist, the
+daemon never attempts to import `@abandonware/noble` at all (no error, no
+attempted native load); with a bluetooth device present but the optional
+native dependency not installed, the failure is caught and logged
+(`BLE GATT adapter stopped: Cannot find package '@abandonware/noble'...`)
+and the daemon keeps serving every other device normally — the crash-
+isolation behaviour described above under "Adapters as swappable modules"
+is not just a design claim here, it was exercised.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
@@ -255,4 +273,28 @@ GitLab, self-hosted — anything `git push` can reach):
 ```sh
 echo 'METERKAST_BACKUP_REMOTE=git@github.com:you/meterkast-dns-backups.git' >> .env
 node --env-file=.env bin/sync-backups.js
+```
+
+BLE, on real hardware — `@abandonware/noble` needs a native build, which
+needs different prerequisites per platform:
+
+- **Linux** (best-supported — noble was built against BlueZ):
+  `sudo apt install build-essential python3 bluetooth libbluetooth-dev libudev-dev`,
+  then after `npm install`, `sudo setcap cap_net_raw+eip $(eval readlink -f \`which node\`)`
+  so scanning doesn't need root.
+- **macOS**: Xcode Command Line Tools (`xcode-select --install`), then grant
+  Bluetooth permission to your terminal app once (System Settings → Privacy
+  & Security → Bluetooth).
+- **Windows**: Visual Studio Build Tools with the "Desktop development with
+  C++" workload, plus Python 3, for `node-gyp`. Uses a WinRT-based backend
+  (`noble-winrt`), needs Windows 10+. The least battle-tested of the three —
+  theoretical support exists, but it has not been verified working here.
+
+Retry `npm install` on the real machine once those prerequisites are in
+place (the native build fails silently and is skipped without them, same
+as it did in this environment), then check raw scanning works before
+worrying about a specific device's GATT services:
+
+```sh
+node bin/scan-ble.js   # lists nearby BLE devices and their MACs for 15s
 ```
