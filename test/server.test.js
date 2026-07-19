@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { createRegistry } from "../src/core/registry/create-registry.js";
 import { getRecord } from "../src/core/registry/get-record.js";
 import { handleReport } from "../src/core/server/handle-report.js";
-import { serveWebScanPage } from "../src/core/server/serve-web-scan-page.js";
+import { serveStaticPage } from "../src/core/server/serve-static-page.js";
 
 function fakeRequestWithBody(bodyString) {
   const req = new EventEmitter();
@@ -74,11 +74,20 @@ test("handleReport responds 400 for an invalid JSON body, without touching the r
   assert.equal(getRecord(registry, "kitchen-thermometer-battery"), undefined);
 });
 
-test("serveWebScanPage serves the page as HTML", async () => {
+test("serveStaticPage serves web-scan.html as HTML", async () => {
   const res = fakeResponse();
-  await serveWebScanPage({}, res);
+  await serveStaticPage("web-scan.html", {}, res);
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.headers["content-type"], "text/html; charset=utf-8");
   assert.match(res.body, /WebBLE/);
+});
+
+test("serveStaticPage serves index.html as HTML", async () => {
+  const res = fakeResponse();
+  await serveStaticPage("index.html", {}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["content-type"], "text/html; charset=utf-8");
+  assert.match(res.body, /Devices/);
 });
