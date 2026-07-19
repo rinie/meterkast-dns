@@ -249,8 +249,10 @@ mqtt-broker.address      = "_mqtt._tcp.local"
 mqtt-broker.password_env = "MQTT_BROKER_PASSWORD"
 ```
 
-The real value lives in a gitignored `.env` file, loaded by running with
-`node --env-file=.env` (native to Node, no dependency). This isn't a special
+The real value lives in a gitignored `.env` file, loaded automatically by
+`npm start` via `--env-file-if-exists=.env` (native to Node, no
+dependency — a no-op when `.env` doesn't exist, so the same command works
+either way). This isn't a special
 case of the naming rule above — it's a stronger one: a secret isn't Semantic
 *or* Gutenberg, and doesn't belong in the resolver's mapping at all. The
 concrete case where this matters most: the Zigbee coordinator-migration idea
