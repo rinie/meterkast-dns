@@ -1,5 +1,4 @@
-import { upsertRecord } from "../registry/upsert-record.js";
-import { recordsAsObject } from "../registry/records-as-object.js";
+import { upsertRecord, recordsAsObject } from "./registry.js";
 
 // Shared wiring for every polling adapter (Dirigera, Ecowitt, Smartbridge,
 // ...): only runs if the playlist actually configured a device for that

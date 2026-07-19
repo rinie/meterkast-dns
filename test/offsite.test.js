@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { syncGitBackups } from "../src/core/offsite/sync-git-backups.js";
+import { syncGitBackups } from "../src/core/offsite.js";
 
 const execFileAsync = promisify(execFile);
 

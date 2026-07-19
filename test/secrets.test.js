@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveSecretEnv } from "../src/core/secrets/resolve-secret-env.js";
+import { resolveSecretEnv } from "../src/core/secrets.js";
 
 test("resolveSecretEnv returns the value of a set environment variable", () => {
   process.env.METERKAST_TEST_SECRET = "hunter2";

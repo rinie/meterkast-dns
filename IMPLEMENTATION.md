@@ -18,77 +18,34 @@ ESM, no bundler, no framework, no TypeScript build step.
   exactly this behaviour (write `foo.ts`, still `import "./foo.js"`), so the
   constraint holds either way. Plain JS just gets there with zero build step.
 
-## File convention: one file per function, not one file per layer
+## File convention: one file per module, not one file per function
 
-Each exported function lives in its own file. No classes, no hidden state —
-state is a plain object (a `Map` plus a `Set` of subscribers, for the
-registry) passed explicitly into every function that touches it. A "module"
-here is a directory of single-purpose files, not a class with methods:
+Each file holds every function for one cohesive feature — a "chapter", not a
+"paragraph". No classes, no hidden state — state is a plain object (a `Map`
+plus a `Set` of subscribers, for the registry) passed explicitly into every
+function that touches it. A directory that would otherwise hold only a
+single file is flattened instead: the file sits at the parent level directly.
+Related-but-distinct concerns (e.g. playlist read/write vs. its dated-backup
+versioning) still get their own file when the concern is big enough to
+justify one, but the boundary is "a feature", never "a function":
 
 ```
 src/
   core/
-    registry/
-      create-registry.js   # {records: Map, subscribers: Set}
-      upsert-record.js
-      remove-record.js
-      get-record.js
-      list-records.js
-      subscribe.js
-      records-as-object.js  # {records: Map} -> {name: record}, for adapters
-    naming/
-      slugify.js
-      suffix-from-ip.js
-      suffix-from-counter.js
-      suggest-name.js       # composes the three above
-    playlist/
-      read-playlist.js         # TOML -> records
-      write-playlist.js        # records -> TOML, atomic write + snapshot
-      watch-playlist.js        # fs.watch wrapper
-      flatten-device-readings.js  # [devices.*][.readings] -> flat records
-      backup/
-        snapshot-playlist.js       # orchestrates the dated-backup decision
-        format-backup-date.js      # Date -> "YYYY-MM-DD"
-        format-backup-filename.js  # (baseName, date, version) -> filename
-        list-backup-versions.js    # existing version numbers for a day
-        read-latest-backup.js      # content of the highest version for a day
-        is-valid-toml.js           # the "validated" gate
-    secrets/
-      resolve-secret-env.js    # env var name -> its value, or a clear error
-    adapters/
-      run-polling-adapter.js   # shared wiring: check transport, run, upsert
-    offsite/
-      sync-git-backups.js      # orchestrates: init if needed, commit, push
-      run-git.js                # execFile("git", args, {cwd}) wrapper
-      is-git-repo.js
-      init-git-repo.js
-      has-uncommitted-changes.js
-      commit-backups.js
-      push-backups.js
-    server/
-      create-server.js         # routes to the handlers below
-      handle-list.js           # GET /devices
-      handle-get.js             # GET /devices/:name
-      handle-subscribe.js       # GET /events (SSE)
-      handle-report.js          # POST /devices/:name -- generic write path
-      serve-static-page.js      # GET / and GET /web-scan -- serves public/*.html
+    registry.js          # create/upsert/remove/get/list/subscribe + recordsAsObject
+    naming.js             # slugify, suffixFromIp, suffixFromCounter, suggestName
+    playlist.js            # read/write (atomic + snapshot) + watch + flattenDeviceReadings
+    playlist-backup.js      # dated-backup versioning: format, list, read-latest, validate, snapshot
+    secrets.js               # resolveSecretEnv -- env var name -> value, or a clear error
+    run-polling-adapter.js    # shared wiring: check transport, run, upsert
+    offsite.js                 # git-backed offsite sync: init, commit, push, orchestrate
+    server.js                   # createServer + every route handler + static-page serving
   adapters/
     load-adapters.js            # dynamic import() loader
     static-adapter.js           # example/test adapter, no hardware
-    dirigera/
-      dirigera-adapter.js          # polling loop -- real hub UNVERIFIED, see below
-      fetch-dirigera-devices.js    # the HTTPS call, tested against a local mock
-      parse-dirigera-response.js   # status/body -> parsed JSON, or a clear error
-      match-configured-devices.js  # Dirigera's device list x playlist config -> records
-    ecowitt/
-      ecowitt-adapter.js           # polling loop, one HTTPS call per device
-      fetch-ecowitt-reading.js     # the HTTPS call -- verified against the real API
-      parse-ecowitt-response.js    # HTTP status + API-level code -> .data, or a clear error
-    smartbridge/
-      smartbridge-adapter.js       # polling loop, one bulk HTTPS call
-      fetch-smartbridge-devices.js # the HTTPS call -- verified against the real API
-      parse-smartbridge-response.js  # status/body -> parsed device array
-      match-configured-devices.js  # matches by id; encrypted data/status pass through as-is
+    dirigera-adapter.js          # fetch + parse + match + polling loop, all of it
+    ecowitt-adapter.js           # fetch + parse + polling loop, all of it
+    smartbridge-adapter.js       # fetch + parse + match + polling loop, all of it
 bin/
   meterkastd.js                  # entrypoint: loads the playlist, starts the server
   sync-backups.js                 # cron-friendly: pushes backups/ offsite
@@ -174,23 +131,24 @@ backups/                         # dated snapshots, written automatically, gitig
   on any platform, for anyone, and the security-audit surface it removed
   along with it was real (`npm audit` went from 7 high-severity findings,
   all in `node-gyp`'s own transitive tooling, to 0).
-- **WebBLE/WebUSB — the only BLE/USB path now** — `handle-report.js` adds a
-  generic `POST /devices/:name`, deliberately transport-agnostic (it stores
-  whatever record it's given, no BLE-specific decode logic in core code) so
-  any future push-based adapter can reuse it. `public/web-scan.html` is a
+- **WebBLE/WebUSB — the only BLE/USB path now** — `handleReport` (in
+  `src/core/server.js`) adds a generic `POST /devices/:name`, deliberately
+  transport-agnostic (it stores whatever record it's given, no BLE-specific
+  decode logic in core code) so any future push-based adapter can reuse it.
+  `public/web-scan.html` is a
   self-contained static page — no build step, no bundler, no framework —
   and is where the actual `navigator.bluetooth`/`navigator.usb` calls and
   byte decoding happen, client-side, since those APIs don't exist in Node
   at all.
-- **One static-page handler for both pages** — `serve-static-page.js`
-  takes a filename and serves it from `public/`, used for both `GET /`
-  (`index.html`) and `GET /web-scan` (`web-scan.html`). A second nearly
-  identical file existed briefly when `web-scan.html` was the only page;
-  consolidated rather than copy-pasted once a second page needed the exact
-  same "read a file, serve as HTML" logic.
+- **One static-page handler for both pages** — `serveStaticPage` (in
+  `src/core/server.js`) takes a filename and serves it from `public/`, used
+  for both `GET /` (`index.html`) and `GET /web-scan` (`web-scan.html`). A
+  second nearly identical function existed briefly when `web-scan.html` was
+  the only page; consolidated rather than copy-pasted once a second page
+  needed the exact same "read a file, serve as HTML" logic.
 - **Dirigera via plain `node:https`, no client library** — a polling loop,
   not an event stream: no documented real-time push mechanism, so
-  `dirigera-adapter.js` calls `GET /v1/devices` on an interval (default
+  `src/adapters/dirigera-adapter.js` calls `GET /v1/devices` on an interval (default
   30s) and diffs against what's configured. `rejectUnauthorized: false` is
   scoped to that one request (the hub's self-signed cert), never set
   globally via `NODE_TLS_REJECT_UNAUTHORIZED`. Runs in-process like MQTT
@@ -207,12 +165,12 @@ backups/                         # dated snapshots, written automatically, gitig
   keep reporting even if one is offline. Smartbridge polls once per cycle
   for every device on the account, same bulk shape as Dirigera.
 - **One shared function runs every polling adapter** —
-  `run-polling-adapter.js` checks whether the playlist configured any
-  device for a transport, runs the adapter only if so, and folds every
+  `src/core/run-polling-adapter.js` checks whether the playlist configured
+  any device for a transport, runs the adapter only if so, and folds every
   yielded reading back into the registry. Extracted once a third adapter
   needed the identical wiring `bin/meterkastd.js` had been repeating for
-  Dirigera and Ecowitt — same reasoning as consolidating
-  `serve-static-page.js` once a second page needed it.
+  Dirigera and Ecowitt — same reasoning as consolidating `serveStaticPage`
+  once a second page needed it.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -256,8 +214,9 @@ exists yet. `bin/sync-backups.js` runs separately (intended for cron) and
 pushes `backups/` to whatever private git remote you've configured.
 
 **The WebBLE/WebUSB path is real and tested, verified inside an actual
-browser, not just Node.** `handle-report.js` and `serve-static-page.js`
-have unit tests (a fake request/response, no server needed). End-to-end:
+browser, not just Node.** `handleReport` and `serveStaticPage` (both in
+`src/core/server.js`) have unit tests (a fake request/response, no server
+needed). End-to-end:
 the daemon was started for real, `GET /web-scan` was loaded in an actual
 Chromium browser pane (Electron 42.5, confirmed via `navigator.userAgent`),
 and it correctly rendered one button per bluetooth-transport playlist entry
@@ -303,15 +262,16 @@ against the actual source rather than assumed).
 
 **All three of Dirigera, Ecowitt, and Smartbridge are now verified against
 the real service, not just a local mock — the same tier for all three, not
-a gap between them.** `parse-*-response.js` and `match-configured-devices.js`
-(Dirigera, Smartbridge) are pure and tested against fixtures — Dirigera's
-with hand-built data, Ecowitt's and Smartbridge's captured from real
-responses (`test/fixtures/ecowitt-real-time-response.json`,
+a gap between them.** Each adapter's `parse*Response` and (Dirigera,
+Smartbridge) `matchConfiguredDevices` functions are pure and tested against
+fixtures — Dirigera's with hand-built data, Ecowitt's and Smartbridge's
+captured from real responses (`test/fixtures/ecowitt-real-time-response.json`,
 `smartbridge-sync-response.json` — device/home IDs genericized before
-committing, the response shape itself is real). Each `fetch-*.js` — the
-actual HTTPS request, headers, and TLS handling — is additionally tested
-against a local self-signed mock server (`test/fixtures/test-cert.*`),
-covering both a successful response and a rejection.
+committing, the response shape itself is real). Each adapter's `fetch*`
+function — the actual HTTPS request, headers, and TLS handling — is
+additionally tested against a local self-signed mock server
+(`test/fixtures/test-cert.*`), covering both a successful response and a
+rejection.
 
 Beyond the unit tests, each adapter was run for real, end to end, against
 production: the real daemon started with real `.env` credentials, polling

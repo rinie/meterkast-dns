@@ -4,8 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseEcowittResponse } from "../src/adapters/ecowitt/parse-ecowitt-response.js";
-import { fetchEcowittReading } from "../src/adapters/ecowitt/fetch-ecowitt-reading.js";
+import { parseEcowittResponse, fetchEcowittReading } from "../src/adapters/ecowitt-adapter.js";
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 

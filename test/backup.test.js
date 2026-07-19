@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatBackupDate } from "../src/core/playlist/backup/format-backup-date.js";
-import { formatBackupFilename } from "../src/core/playlist/backup/format-backup-filename.js";
-import { listBackupVersions } from "../src/core/playlist/backup/list-backup-versions.js";
-import { isValidToml } from "../src/core/playlist/backup/is-valid-toml.js";
-import { snapshotPlaylist } from "../src/core/playlist/backup/snapshot-playlist.js";
+import {
+  formatBackupDate,
+  formatBackupFilename,
+  listBackupVersions,
+  isValidToml,
+  snapshotPlaylist,
+} from "../src/core/playlist-backup.js";
 
 test("formatBackupDate pads month and day to two digits", () => {
   assert.equal(formatBackupDate(new Date(2026, 0, 5)), "2026-01-05");

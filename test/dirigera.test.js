@@ -4,9 +4,11 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseDirigeraResponse } from "../src/adapters/dirigera/parse-dirigera-response.js";
-import { matchConfiguredDevices } from "../src/adapters/dirigera/match-configured-devices.js";
-import { fetchDirigeraDevices } from "../src/adapters/dirigera/fetch-dirigera-devices.js";
+import {
+  parseDirigeraResponse,
+  matchConfiguredDevices,
+  fetchDirigeraDevices,
+} from "../src/adapters/dirigera-adapter.js";
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
