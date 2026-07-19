@@ -35,7 +35,6 @@ src/
       get-record.js
       list-records.js
       subscribe.js
-      records-as-object.js  # {records: Map} -> {name: record}, for adapters
     naming/
       slugify.js
       suffix-from-ip.js
@@ -73,25 +72,9 @@ src/
   adapters/
     load-adapters.js            # dynamic import() loader
     static-adapter.js           # example/test adapter, no hardware
-    ble-gatt/
-      ble-gatt-adapter.js          # noble wiring -- scan/discover UNVERIFIED, see below
-      read-device-readings.js      # connect/read/decode/disconnect one device
-      group-readings-by-address.js # flat records -> Map<address, readings[]>
-      create-async-queue.js        # bridges noble's events to the async generator
-      normalize-address.js         # MAC comparison, case/separator-insensitive
-      resolve-service-uuid.js      # semantic name -> SIG-assigned UUID
-      resolve-characteristic-uuid.js
-      known-services.js            # the SIG registry subset backing the above
-      known-characteristics.js
-      decode-characteristic.js     # dispatches by characteristic name
-      decode-temperature-measurement.js  # IEEE-11073 FLOAT, per spec
-      decode-weight-measurement.js       # packed weight+flags, per spec
-      decode-battery-level.js            # uint8 percentage
 bin/
-  meterkastd.js                  # entrypoint: loads the playlist, starts the server,
-                                  # runs the BLE GATT adapter if any device needs it
+  meterkastd.js                  # entrypoint: loads the playlist, starts the server
   sync-backups.js                 # cron-friendly: pushes backups/ offsite
-  scan-ble.js                     # standalone: is noble seeing anything at all?
 test/
   registry.test.js
   naming.test.js
@@ -99,7 +82,6 @@ test/
   backup.test.js
   secrets.test.js
   offsite.test.js
-  ble-gatt.test.js
   server.test.js
   run-all.js                     # see "Testing" below
 public/
@@ -114,8 +96,9 @@ backups/                         # dated snapshots, written automatically, gitig
 ## Library choices, kept minimal on purpose
 
 - **TOML parsing** — [`smol-toml`](https://www.npmjs.com/package/smol-toml):
-  ESM-native, zero dependencies, spec-compliant TOML 1.0. The only runtime
-  dependency this package has.
+  ESM-native, zero dependencies, spec-compliant TOML 1.0. The only
+  dependency this project has, period — see "No native dependencies at all"
+  below for why that's true even for BLE/USB.
 - **Watching the hand-edited file** — native `fs.promises.watch()`, no
   `chokidar`. Its cross-platform quirks (inotify vs FSEvents vs Windows) are
   real; not a concern for the current single-file, single-host use case.
@@ -154,22 +137,24 @@ backups/                         # dated snapshots, written automatically, gitig
   should do on its own. Tested end-to-end against a local bare repo
   (`git init --bare`) standing in for the real remote — no network or real
   GitHub access needed to verify it works.
-- **BLE via an optional native dependency, isolated at install time too** —
-  `@abandonware/noble` is an `optionalDependency`, not a regular one:
-  `npm install` succeeds whether or not it can build (it's a native addon;
-  in this environment its build fails and npm silently skips it, which is
-  exactly the scenario this was built for — confirmed by actually running
-  `npm install` here). The GATT wiring itself lives behind a dynamic
-  `import()` in `ble-gatt-adapter.js`, so its absence never breaks the core,
-  the other adapters, or `npm test`.
-- **WebBLE/WebUSB as the no-compiler alternative** — `handle-report.js`
-  adds a generic `POST /devices/:name`, deliberately transport-agnostic
-  (it stores whatever record it's given, no BLE-specific decode logic in
-  core code) so any future push-based adapter can reuse it, not just this
-  one. `public/web-scan.html` is a self-contained static page — no build
-  step, no bundler, no framework — served by `serve-web-scan-page.js` and
-  is where the actual `navigator.bluetooth`/`navigator.usb` calls and byte
-  decoding happen, client-side, since those APIs don't exist in Node.
+- **No native dependencies at all, for BLE or USB** — an earlier version of
+  this project used `@abandonware/noble` (a native addon) for BLE, behind
+  an `optionalDependency` so its absence never broke `npm install`. It's
+  gone now, along with every `node-gyp`/compiler prerequisite, replaced
+  entirely by the WebBLE/WebUSB path below — see README.md "WebBLE/WebUSB
+  as the alternative to a native binding" for why that trade is a strict
+  improvement, not just a workaround: `npm install` never needs a compiler
+  on any platform, for anyone, and the security-audit surface it removed
+  along with it was real (`npm audit` went from 7 high-severity findings,
+  all in `node-gyp`'s own transitive tooling, to 0).
+- **WebBLE/WebUSB — the only BLE/USB path now** — `handle-report.js` adds a
+  generic `POST /devices/:name`, deliberately transport-agnostic (it stores
+  whatever record it's given, no BLE-specific decode logic in core code) so
+  any future push-based adapter can reuse it. `public/web-scan.html` is a
+  self-contained static page — no build step, no bundler, no framework —
+  served by `serve-web-scan-page.js`, and is where the actual
+  `navigator.bluetooth`/`navigator.usb` calls and byte decoding happen,
+  client-side, since those APIs don't exist in Node at all.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -183,17 +168,16 @@ backups/                         # dated snapshots, written automatically, gitig
   Isolation is not the default, and it is not about throughput. Node's
   event loop already handles many concurrent I/O-bound adapters — MQTT/mDNS,
   file watching — fine in one process; async I/O is strictly better there
-  than the overhead of a separate process would be. The one real reason to
-  isolate an adapter is a native binding with genuine crash risk: BLE
-  (BlueZ, via a binding like `@abandonware/noble`) and USB (`libusb`/
-  `node-usb`) are native C/C++ addons, and a fault in the native library —
-  a misbehaving USB device, a BlueZ bug — takes the whole process down with
-  it, event loop included, because the failure isn't happening in JS where
-  the event loop has any say. A `child_process` contains that: the adapter
-  dies, the core and every other adapter keep running. This is
-  precautionary, not a response to crashes being common — well-behaved
-  native bindings should rarely fail; the isolation exists for the rare
-  case, not the typical one.
+  than the overhead of a separate process would be. The remaining case
+  where a native/blocking binding would still need real crash isolation is
+  USB via `libusb`/`node-usb`, if that adapter ever gets built instead of a
+  WebUSB equivalent: a fault in a native library — a misbehaving USB
+  device, a driver bug — takes the whole process down with it, event loop
+  included, because the failure isn't happening in JS where the event loop
+  has any say. A `child_process` contains that: the adapter dies, the core
+  and every other adapter keep running. This is precautionary, not a
+  response to crashes being common — well-behaved native bindings should
+  rarely fail; the isolation exists for the rare case, not the typical one.
 
   CPU-bound work — decoding RC5/newKaku pulse timing in a tight loop, say —
   is a different problem with a different answer: `worker_threads`, not
@@ -213,50 +197,7 @@ in README.md), serves `GET /devices`, `GET /devices/:name`, and
 exists yet. `bin/sync-backups.js` runs separately (intended for cron) and
 pushes `backups/` to whatever private git remote you've configured.
 
-**The BLE GATT adapter is real, in two honestly different senses.** The
-UUID resolvers (`resolve-service-uuid.js`, `resolve-characteristic-uuid.js`)
-and the characteristic decoders (`decode-temperature-measurement.js` —
-IEEE 11073-20601 32-bit FLOAT; `decode-weight-measurement.js` — packed
-weight+flags; `decode-battery-level.js`) are genuine, spec-correct
-implementations, verified against known-correct byte sequences from the
-GATT spec (36.5°C, 72.5 kg, both encoded and decoded by hand to confirm the
-math). `read-device-readings.js` — connect once, read and decode every
-reading on a device, always disconnect — is verified against a fake
-peripheral matching `@abandonware/noble`'s documented async API
-(`connectAsync`, `discoverSomeServicesAndCharacteristicsAsync`,
-`disconnectAsync`), including the failure path (a read throwing still
-disconnects) and the missing-characteristic path. `flatten-device-readings.js`
-turns a nested `[devices.name]` + `[devices.name.readings]` playlist section
-into flat, independently queryable registry records — verified end-to-end
-by starting the real daemon against the example playlist and querying
-`GET /devices/kitchen-thermometer-temperature` and `-battery`.
-
-**`ble-gatt-adapter.js` itself — the part that actually calls into
-`@abandonware/noble` to scan and discover peripherals — has not been
-exercised against real BLE hardware in this environment**, and says so in
-its own file comment. Everything it calls is real and tested; its own job
-(driving noble's `discover`/`stateChange` events) isn't. USB (`udev`),
-Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and 433MHz/IR (RC5/newKaku
-decoding) adapters remain out of scope entirely — `static-adapter.js`
-still exists to pin down the plain adapter contract for those.
-
-**The adapter is wired into `bin/meterkastd.js`, and the wiring itself is
-verified — just not the scan behind it.** On startup, if any playlist entry
-has `transport = "bluetooth"`, the daemon runs `bleGattAdapter` in the
-background and folds every reading it yields back into the registry via
-`upsertRecord`, so a live BLE value updates the same record the HTTP API
-and SSE stream already serve. Two things about this were actually run and
-confirmed, not just written: with no bluetooth devices in the playlist, the
-daemon never attempts to import `@abandonware/noble` at all (no error, no
-attempted native load); with a bluetooth device present but the optional
-native dependency not installed, the failure is caught and logged
-(`BLE GATT adapter stopped: Cannot find package '@abandonware/noble'...`)
-and the daemon keeps serving every other device normally — the crash-
-isolation behaviour described above under "Adapters as swappable modules"
-is not just a design claim here, it was exercised.
-
-**The WebBLE/WebUSB path is real and tested up to the same hardware
-boundary as noble, verified in a genuinely different way: inside an actual
+**The WebBLE/WebUSB path is real and tested, verified inside an actual
 browser, not just Node.** `handle-report.js` and `serve-web-scan-page.js`
 have unit tests (a fake request/response, no server needed). End-to-end:
 the daemon was started for real, `GET /web-scan` was loaded in an actual
@@ -267,9 +208,10 @@ reported `true` — a real adapter is reachable from that browser. A `POST`
 with a hand-decoded 36.5°C reading round-tripped correctly through
 `GET /devices/kitchen-thermometer-temperature`. The page's browser-side
 decoder (`DataView`-based, since `Buffer` doesn't exist in a browser) was
-verified against the identical known-good byte sequences the Node-side
-`decode-temperature-measurement.js`/`decode-weight-measurement.js` tests
-use, run directly in that browser — same input bytes, same output values.
+verified against the identical known-good byte sequences the GATT spec
+defines for those characteristics (36.5°C, 72.5 kg — encoded and decoded by
+hand to confirm the IEEE-11073/weight-measurement math), run directly in
+that browser — same input bytes, same output values.
 
 **The one thing that could not be verified, and the reason is specific and
 worth recording accurately:** a real user gesture *does* satisfy
@@ -286,6 +228,11 @@ than "no hardware" or "gesture rejected" — the gesture and the adapter both
 check out; only the picker step is unavailable in this particular browser
 embedding. A real Chrome or Edge tab, opened by a human, does not have this
 gap.
+
+**USB (`udev`), Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and 433MHz/IR
+(RC5/newKaku decoding) adapters remain out of scope entirely** —
+`static-adapter.js` still exists to pin down the plain adapter contract for
+whichever of those gets built next.
 
 ## Testing
 
@@ -312,11 +259,11 @@ curl http://localhost:8420/devices/myHpPrinter
 curl -N http://localhost:8420/events                    # streams SSE change events
 ```
 
-BLE/USB via the browser instead of a native binding — no compiler needed
-anywhere. Open `http://localhost:8420/web-scan` in Chrome or Edge (not
-Firefox or Safari) with the daemon running; it lists every bluetooth-
-transport playlist entry with a `service`/`characteristic` pair and lets
-you connect and read each one for real.
+BLE/USB, in Chrome or Edge (not Firefox or Safari) — no compiler, no
+`node-gyp`, no prerequisites of any kind beyond the browser itself. With
+the daemon running, open `http://localhost:8420/web-scan`; it lists every
+bluetooth-transport playlist entry with a `service`/`characteristic` pair
+and lets you connect and read each one for real.
 
 Offsite backup, once you've created a private repo yourself (GitHub,
 GitLab, self-hosted — anything `git push` can reach):
@@ -324,28 +271,4 @@ GitLab, self-hosted — anything `git push` can reach):
 ```sh
 echo 'METERKAST_BACKUP_REMOTE=git@github.com:you/meterkast-dns-backups.git' >> .env
 node --env-file=.env bin/sync-backups.js
-```
-
-BLE, on real hardware — `@abandonware/noble` needs a native build, which
-needs different prerequisites per platform:
-
-- **Linux** (best-supported — noble was built against BlueZ):
-  `sudo apt install build-essential python3 bluetooth libbluetooth-dev libudev-dev`,
-  then after `npm install`, `sudo setcap cap_net_raw+eip $(eval readlink -f \`which node\`)`
-  so scanning doesn't need root.
-- **macOS**: Xcode Command Line Tools (`xcode-select --install`), then grant
-  Bluetooth permission to your terminal app once (System Settings → Privacy
-  & Security → Bluetooth).
-- **Windows**: Visual Studio Build Tools with the "Desktop development with
-  C++" workload, plus Python 3, for `node-gyp`. Uses a WinRT-based backend
-  (`noble-winrt`), needs Windows 10+. The least battle-tested of the three —
-  theoretical support exists, but it has not been verified working here.
-
-Retry `npm install` on the real machine once those prerequisites are in
-place (the native build fails silently and is skipped without them, same
-as it did in this environment), then check raw scanning works before
-worrying about a specific device's GATT services:
-
-```sh
-node bin/scan-ble.js   # lists nearby BLE devices and their MACs for 15s
 ```

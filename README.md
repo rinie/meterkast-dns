@@ -92,14 +92,14 @@ transport's ceremony and noise into one clean record in the core store
 (whether an adapter runs in-process or gets true OS-level isolation is a
 separate question — see IMPLEMENTATION.md):
 
-- **BLE adapter** — wraps BlueZ (or platform equivalent), does continuous
-  background scanning, and once a device is confirmed once by the user it's
-  registered under a user-chosen name permanently — the AirPods pattern,
-  generalized past a single vendor instead of copied by one. For devices
-  with more than one GATT reading worth exposing (a thermometer's
-  temperature and battery, say), also resolves the SIG-standardized
-  service/characteristic names to their real UUIDs. See "Extending to BLE
-  GATT characteristics" below.
+- **BLE adapter** — a browser page (WebBLE), not a native binding; see
+  "WebBLE/WebUSB as the alternative to a native binding" below for why. The
+  pairing dialog is the AirPods pattern generalized past a single vendor —
+  a one-time gesture, not repeated per reconnect. For devices with more
+  than one GATT reading worth exposing (a thermometer's temperature and
+  battery, say), also resolves the SIG-standardized service/characteristic
+  names to their real UUIDs. See "Extending to BLE GATT characteristics"
+  below.
 - **USB adapter** — wraps `udev`, maps VID:PID+serial to a stable name that
   survives the device moving to a different physical port. This is close to
   what `udev`'s `by-id` symlinks already do locally and quietly — the adapter
@@ -369,14 +369,22 @@ actually implemented here" for exactly which parts are real and tested
 (the UUID resolvers, the decoders, the nested-to-flat playlist loading) and
 which one remains unverified against real hardware (the actual BLE scan).
 
-### WebBLE/WebUSB as the alternative to a native binding
+### WebBLE/WebUSB instead of a native binding
 
-`@abandonware/noble` needs `node-gyp` — a real C++ compiler and Python —
-to build at all, on every platform, not just Windows: it ships no prebuilt
+An earlier version of this design used `@abandonware/noble`, a native
+addon, for BLE. It needed `node-gyp` — a real C++ compiler and Python — to
+build at all, on every platform, not just Windows: it ships no prebuilt
 binary in its npm package (confirmed by extracting the actual tarball; no
 `prebuilds/` directory), so `node-gyp-build` always falls through to
 compiling from source. On a machine where installing a compiler isn't an
-option, that's a hard stop.
+option — a work laptop with locked-down install permissions, say — that's
+a hard stop, not a workaround-able inconvenience. It's gone now, along
+with every `node-gyp` prerequisite, and the removal itself is a concrete,
+measured improvement, not just a theoretical one: `npm audit` went from 7
+high-severity findings (all inside `node-gyp`'s own bundled tooling —
+`npmlog`, `gauge`, `are-we-there-yet`, an old `inflight`/`glob`/`tar` —
+none of it this project's own code) to 0, and the lockfile shrank from
+roughly 1,950 lines to 35.
 
 `navigator.bluetooth` and `navigator.usb` sidestep the problem entirely —
 no native addon, no compiler, no `node-gyp`, because the browser already
@@ -398,11 +406,11 @@ for readings to flow. A new generic write endpoint, `POST /devices/:name`,
 lets that browser page push a reading across the process boundary into the
 registry; the page itself does the actual `requestDevice()` → `connect()`
 → `getCharacteristic()` → `readValue()` flow and decodes the bytes
-client-side (a small, deliberately duplicated mirror of the Node decoders —
-`Buffer` isn't available in a browser, `DataView` is what Web Bluetooth
-hands back) before posting `{transport, address, service, characteristic,
-meta}` — the same shape the native adapter produces, so `GET /devices/:name`
-looks identical regardless of which path produced the reading.
+client-side (`Buffer` isn't available in a browser; `DataView` is what Web
+Bluetooth hands back) before posting `{transport, address, service,
+characteristic, meta}` — the same `{value, unit}` shape every other reading
+in this design carries, so `GET /devices/:name` looks identical regardless
+of which adapter produced it.
 
 **The pairing dialog is still the one-time bootstrap ceremony** already
 described above — Chrome's device picker instead of an OS pairing prompt.
@@ -411,12 +419,10 @@ first connect without any further click.
 
 **Real, worth stating plainly: Chromium only.** Firefox and Safari have
 both declined to implement Web Bluetooth/WebUSB, citing privacy and
-fingerprinting concerns. Chrome or Edge, nothing else.
-
-Native noble stays documented and implemented as the other option — for a
-machine that already has a working toolchain, it doesn't need a browser tab
-open at all. Which one to use is a per-machine choice, not a decision this
-design makes for you.
+fingerprinting concerns. Chrome or Edge, nothing else. The trade this
+design makes is explicit: give up the always-on background daemon for
+BLE/USB specifically, in exchange for zero native dependencies, anywhere,
+for anyone.
 
 ### What already exists and should be reused, not reinvented
 
