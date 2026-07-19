@@ -64,10 +64,12 @@ src/
       commit-backups.js
       push-backups.js
     server/
-      create-server.js         # routes to the three handlers below
+      create-server.js         # routes to the handlers below
       handle-list.js           # GET /devices
       handle-get.js             # GET /devices/:name
       handle-subscribe.js       # GET /events (SSE)
+      handle-report.js          # POST /devices/:name -- generic write path
+      serve-web-scan-page.js    # GET /web-scan -- serves public/web-scan.html
   adapters/
     load-adapters.js            # dynamic import() loader
     static-adapter.js           # example/test adapter, no hardware
@@ -98,7 +100,10 @@ test/
   secrets.test.js
   offsite.test.js
   ble-gatt.test.js
+  server.test.js
   run-all.js                     # see "Testing" below
+public/
+  web-scan.html                  # WebBLE/WebUSB page -- see README.md
 device-playlist.example.toml     # fixture/template, committed
 device-playlist.toml             # the real Use-editable data file, gitignored
 backups/                         # dated snapshots, written automatically, gitignored
@@ -157,6 +162,14 @@ backups/                         # dated snapshots, written automatically, gitig
   `npm install` here). The GATT wiring itself lives behind a dynamic
   `import()` in `ble-gatt-adapter.js`, so its absence never breaks the core,
   the other adapters, or `npm test`.
+- **WebBLE/WebUSB as the no-compiler alternative** — `handle-report.js`
+  adds a generic `POST /devices/:name`, deliberately transport-agnostic
+  (it stores whatever record it's given, no BLE-specific decode logic in
+  core code) so any future push-based adapter can reuse it, not just this
+  one. `public/web-scan.html` is a self-contained static page — no build
+  step, no bundler, no framework — served by `serve-web-scan-page.js` and
+  is where the actual `navigator.bluetooth`/`navigator.usb` calls and byte
+  decoding happen, client-side, since those APIs don't exist in Node.
 - **The query/subscribe API** — plain `node:http`, no Express. Subscribing
   uses Server-Sent Events, not WebSockets: it's one-directional (the core
   tells clients when a record changed), which is exactly what SSE is for,
@@ -242,6 +255,38 @@ and the daemon keeps serving every other device normally — the crash-
 isolation behaviour described above under "Adapters as swappable modules"
 is not just a design claim here, it was exercised.
 
+**The WebBLE/WebUSB path is real and tested up to the same hardware
+boundary as noble, verified in a genuinely different way: inside an actual
+browser, not just Node.** `handle-report.js` and `serve-web-scan-page.js`
+have unit tests (a fake request/response, no server needed). End-to-end:
+the daemon was started for real, `GET /web-scan` was loaded in an actual
+Chromium browser pane (Electron 42.5, confirmed via `navigator.userAgent`),
+and it correctly rendered one button per bluetooth-transport playlist entry
+that has a `service`/`characteristic` pair. `navigator.bluetooth.getAvailability()`
+reported `true` — a real adapter is reachable from that browser. A `POST`
+with a hand-decoded 36.5°C reading round-tripped correctly through
+`GET /devices/kitchen-thermometer-temperature`. The page's browser-side
+decoder (`DataView`-based, since `Buffer` doesn't exist in a browser) was
+verified against the identical known-good byte sequences the Node-side
+`decode-temperature-measurement.js`/`decode-weight-measurement.js` tests
+use, run directly in that browser — same input bytes, same output values.
+
+**The one thing that could not be verified, and the reason is specific and
+worth recording accurately:** a real user gesture *does* satisfy
+`requestDevice()`'s activation check here — a synthesized click dispatched
+through browser automation (not a programmatic `.click()`, which correctly
+still throws `SecurityError`) passed the check on both
+`navigator.bluetooth.requestDevice()` and `navigator.usb.requestDevice()`.
+But both then returned `NotFoundError` immediately, with no chooser UI ever
+appearing. Electron doesn't provide a built-in Bluetooth/USB device-chooser
+dialog the way Chrome does — the host app has to implement
+`session.on('select-bluetooth-device', ...)` / `select-usb-device` itself,
+and this one apparently hasn't. That is a different, more specific finding
+than "no hardware" or "gesture rejected" — the gesture and the adapter both
+check out; only the picker step is unavailable in this particular browser
+embedding. A real Chrome or Edge tab, opened by a human, does not have this
+gap.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
@@ -266,6 +311,12 @@ curl http://localhost:8420/devices                     # PORT=8420 by default
 curl http://localhost:8420/devices/myHpPrinter
 curl -N http://localhost:8420/events                    # streams SSE change events
 ```
+
+BLE/USB via the browser instead of a native binding — no compiler needed
+anywhere. Open `http://localhost:8420/web-scan` in Chrome or Edge (not
+Firefox or Safari) with the daemon running; it lists every bluetooth-
+transport playlist entry with a `service`/`characteristic` pair and lets
+you connect and read each one for real.
 
 Offsite backup, once you've created a private repo yourself (GitHub,
 GitLab, self-hosted — anything `git push` can reach):

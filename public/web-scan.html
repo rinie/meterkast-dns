@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>meterkast-dns -- WebBLE/WebUSB scan</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  button { font-size: 1rem; padding: 0.5rem 1rem; margin: 0.25rem 0; }
+  .row { display: flex; align-items: center; gap: 0.75rem; margin: 0.5rem 0; }
+  .status { font-family: monospace; color: #555; }
+</style>
+</head>
+<body>
+<h1>meterkast-dns: WebBLE scan</h1>
+<p>
+  Requires Chrome or Edge (Web Bluetooth is not implemented in Firefox or
+  Safari) and a device already listed in the playlist with a
+  <code>service</code>/<code>characteristic</code> pair -- see README.md
+  "Extending to BLE GATT characteristics".
+</p>
+<div id="targets">Loading playlist...</div>
+
+<script type="module">
+// Mirrors src/adapters/ble-gatt/known-services.js and
+// known-characteristics.js -- kept separate on purpose, not imported,
+// because this runs in the browser with no access to the Node module tree.
+// Keep these two in sync by hand if the server-side tables change.
+const KNOWN_SERVICES = {
+  "health-thermometer": "00001809-0000-1000-8000-00805f9b34fb",
+  "weight-scale": "0000181d-0000-1000-8000-00805f9b34fb",
+  "battery-service": "0000180f-0000-1000-8000-00805f9b34fb",
+  "heart-rate": "0000180d-0000-1000-8000-00805f9b34fb",
+  "device-information": "0000180a-0000-1000-8000-00805f9b34fb",
+};
+const KNOWN_CHARACTERISTICS = {
+  "temperature-measurement": "00002a1c-0000-1000-8000-00805f9b34fb",
+  "weight-measurement": "00002a9d-0000-1000-8000-00805f9b34fb",
+  "battery-level": "00002a19-0000-1000-8000-00805f9b34fb",
+  "heart-rate-measurement": "00002a37-0000-1000-8000-00805f9b34fb",
+};
+const resolveServiceUuid = (name) => KNOWN_SERVICES[name] ?? name;
+const resolveCharacteristicUuid = (name) => KNOWN_CHARACTERISTICS[name] ?? name;
+
+// Mirrors src/adapters/ble-gatt/decode-*.js -- same reason as the tables
+// above: Buffer isn't available in the browser, Web Bluetooth hands back a
+// DataView instead, so this is a deliberate, small, hand-kept-in-sync
+// duplicate rather than a shared module. Decoding happens here, client
+// side, so what gets POSTed is the same {value, unit} shape the native
+// noble adapter produces -- not raw bytes the server would have to know
+// how to interpret.
+function decodeTemperatureMeasurement(view) {
+  const flags = view.getUint8(0);
+  const unit = (flags & 0x01) === 0 ? "celsius" : "fahrenheit";
+  const exponent = view.getInt8(4);
+  let mantissa = view.getUint8(1) | (view.getUint8(2) << 8) | (view.getUint8(3) << 16);
+  if (mantissa & 0x800000) mantissa -= 0x1000000;
+  return { value: mantissa * 10 ** exponent, unit };
+}
+function decodeWeightMeasurement(view) {
+  const flags = view.getUint8(0);
+  const imperial = (flags & 0x01) === 1;
+  const raw = view.getUint16(1, true);
+  return { value: imperial ? raw * 0.01 : raw * 0.005, unit: imperial ? "lb" : "kg" };
+}
+function decodeBatteryLevel(view) {
+  return { value: view.getUint8(0), unit: "%" };
+}
+function decodeCharacteristic(characteristicName, view) {
+  if (characteristicName === "temperature-measurement") return decodeTemperatureMeasurement(view);
+  if (characteristicName === "weight-measurement") return decodeWeightMeasurement(view);
+  if (characteristicName === "battery-level") return decodeBatteryLevel(view);
+  return null; // unknown/proprietary -- nothing to decode against
+}
+
+async function reportReading(name, fields) {
+  const res = await fetch(`/devices/${encodeURIComponent(name)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  if (!res.ok) throw new Error(`report failed: ${res.status}`);
+  return res.json();
+}
+
+async function connectAndRead(target, statusEl) {
+  statusEl.textContent = "requesting device...";
+  const serviceUuid = resolveServiceUuid(target.service);
+  const characteristicUuid = resolveCharacteristicUuid(target.characteristic);
+
+  const device = await navigator.bluetooth.requestDevice({
+    filters: [{ services: [serviceUuid] }],
+  });
+  statusEl.textContent = "connecting...";
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(serviceUuid);
+  const characteristic = await service.getCharacteristic(characteristicUuid);
+
+  const report = async (dataView) => {
+    const meta = decodeCharacteristic(target.characteristic, dataView);
+    await reportReading(target.name, {
+      transport: target.transport,
+      address: device.id,
+      service: target.service,
+      characteristic: target.characteristic,
+      meta,
+    });
+    statusEl.textContent = `reported at ${new Date().toLocaleTimeString()}: ${JSON.stringify(meta)}`;
+  };
+
+  const initial = await characteristic.readValue();
+  await report(initial);
+
+  // Live updates from here on need no further click -- same one-time
+  // bootstrap ceremony principle as everywhere else in this design.
+  characteristic.addEventListener("characteristicvaluechanged", (event) => {
+    report(event.target.value).catch((error) => {
+      statusEl.textContent = `ERROR: ${error.message}`;
+    });
+  });
+  await characteristic.startNotifications();
+  statusEl.textContent += " -- subscribed to live updates";
+}
+
+async function main() {
+  const targetsEl = document.getElementById("targets");
+  const res = await fetch("/devices");
+  const devices = await res.json();
+  const targets = devices.filter((d) => d.transport === "bluetooth" && d.service && d.characteristic);
+
+  if (targets.length === 0) {
+    targetsEl.textContent = "No bluetooth devices with a service/characteristic found in the playlist.";
+    return;
+  }
+
+  targetsEl.innerHTML = "";
+  for (const target of targets) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const button = document.createElement("button");
+    button.textContent = `Connect: ${target.name}`;
+    const status = document.createElement("span");
+    status.className = "status";
+    status.textContent = `${target.service} / ${target.characteristic}`;
+    button.addEventListener("click", () => {
+      connectAndRead(target, status).catch((error) => {
+        status.textContent = `ERROR: ${error.name} - ${error.message}`;
+      });
+    });
+    row.append(button, status);
+    targetsEl.append(row);
+  }
+}
+
+main().catch((error) => {
+  document.getElementById("targets").textContent = `Failed to load playlist: ${error.message}`;
+});
+</script>
+</body>
+</html>
