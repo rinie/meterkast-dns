@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { createRegistry, getRecord } from "../src/core/registry.js";
-import { handleReport, serveStaticPage } from "../src/core/server.js";
+import { createRegistry, getRecord, upsertRecord } from "../src/core/registry.js";
+import { handleReport, serveStaticPage, handleResolved, summarizeResolution } from "../src/core/server.js";
 
 function fakeRequestWithBody(bodyString) {
   const req = new EventEmitter();
@@ -88,4 +88,40 @@ test("serveStaticPage serves index.html as HTML", async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(res.headers["content-type"], "text/html; charset=utf-8");
   assert.match(res.body, /Devices/);
+});
+
+test("summarizeResolution reads resolvedAddress for the dns/mdns-hostname shape", () => {
+  const record = { transport: "dns", meta: { resolvedAddress: "192.168.1.53", family: "A" } };
+  assert.equal(summarizeResolution(record), "192.168.1.53");
+});
+
+test("summarizeResolution combines host:port for the mdns-service shape", () => {
+  const record = { transport: "mdns", meta: { instanceName: "My Broker._mqtt._tcp.local", host: "10.1.2.3", port: 1883 } };
+  assert.equal(summarizeResolution(record), "10.1.2.3:1883");
+});
+
+test("summarizeResolution returns null for an unresolved or non-resolver transport", () => {
+  assert.equal(summarizeResolution({ transport: "mdns", meta: undefined }), null);
+  assert.equal(summarizeResolution({ transport: "dirigera", meta: { isOn: true } }), null);
+});
+
+test("handleResolved lists only dns/mdns records that actually resolved", () => {
+  const registry = createRegistry();
+  upsertRecord(registry, "raspi3", { transport: "dns", address: "raspi3.home", meta: { resolvedAddress: "192.168.1.53", family: "A" } });
+  upsertRecord(registry, "mqtt-broker", {
+    transport: "mdns",
+    address: "_mqtt._tcp.local",
+    meta: { instanceName: "My Broker._mqtt._tcp.local", host: "10.1.2.3", port: 1883, txt: {} },
+  });
+  upsertRecord(registry, "myHpPrinter", { transport: "mdns", address: "printer.local" }); // never resolved
+  upsertRecord(registry, "kitchen-lamp", { transport: "dirigera", address: "dev-1", meta: { isOn: true } }); // not a resolver transport
+
+  const res = fakeResponse();
+  handleResolved(registry, {}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body), [
+    { name: "raspi3", transport: "dns", address: "raspi3.home", resolvedAddress: "192.168.1.53" },
+    { name: "mqtt-broker", transport: "mdns", address: "_mqtt._tcp.local", resolvedAddress: "10.1.2.3:1883" },
+  ]);
 });

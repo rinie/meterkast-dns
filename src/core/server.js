@@ -1,6 +1,7 @@
 // The local HTTP API: routing plus every handler. GET /devices,
-// GET /devices/:name, GET /events (SSE), POST /devices/:name (generic
-// write path), and the two static pages (/ and /web-scan).
+// GET /devices/:name, GET /resolved (dns/mdns entries only, normalized to
+// their live-resolved address), GET /events (SSE), POST /devices/:name
+// (generic write path), and the two static pages (/ and /web-scan).
 import { createServer as createHttpServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -20,6 +21,39 @@ export function handleGet(registry, name, req, res) {
   }
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify(record));
+}
+
+// GET /resolved -- the subset of GET /devices that answers "what did the
+// local resolver actually resolve", not "what's in the playlist". Scoped
+// to transport = "dns"/"mdns" specifically, since those are the two
+// adapters whose whole job is turning a human-typed name (raspi3.home,
+// _mqtt._tcp.local) into a live address -- every other transport's
+// `address` is already the Gutenberg value itself (a device id, a MAC), so
+// "resolved" wouldn't mean anything extra for it. The two adapters' meta
+// shapes differ (resolveHostname's flat `resolvedAddress`, resolveService's
+// `host`/`port` pair for a broker), normalized here into one
+// `resolvedAddress` field so a consumer never has to know which of the two
+// produced a given row. Records that haven't resolved yet (or failed) are
+// left out entirely rather than shown with a null/placeholder value.
+export function summarizeResolution(record) {
+  if (record.transport !== "dns" && record.transport !== "mdns") return null;
+  if (record.meta?.resolvedAddress) return record.meta.resolvedAddress;
+  if (record.meta?.host && record.meta?.port) return `${record.meta.host}:${record.meta.port}`;
+  return null;
+}
+
+export function handleResolved(registry, req, res) {
+  const resolved = listRecords(registry)
+    .map((record) => ({ record, resolvedAddress: summarizeResolution(record) }))
+    .filter(({ resolvedAddress }) => resolvedAddress !== null)
+    .map(({ record, resolvedAddress }) => ({
+      name: record.name,
+      transport: record.transport,
+      address: record.address,
+      resolvedAddress,
+    }));
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify(resolved));
 }
 
 export function handleSubscribe(registry, req, res) {
@@ -82,6 +116,10 @@ export function createServer(registry) {
 
     if (req.method === "GET" && url.pathname === "/devices") {
       return handleList(registry, req, res);
+    }
+
+    if (req.method === "GET" && url.pathname === "/resolved") {
+      return handleResolved(registry, req, res);
     }
 
     if (req.method === "GET" && url.pathname === "/events") {
