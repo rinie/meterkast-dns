@@ -10,6 +10,7 @@
 // because the shape of what gets stored differs. Uses Node's built-in
 // `dns` module -- no new dependency, unlike the mdns adapter.
 import defaultDns from "node:dns/promises";
+import { log } from "../core/log.js";
 
 // Same A-preferred, AAAA-fallback shape as the mdns adapter's
 // resolveHostname, for the same reason: a router-assigned hostname can be
@@ -45,7 +46,7 @@ export default async function* dnsAdapter(records, { intervalMs = 60000, resolve
         const resolved = await resolveDnsHostname(record.address, { resolver });
         yield { ...record, name, meta: resolved };
       } catch (error) {
-        console.error(`DNS resolution failed for ${name}:`, error.message);
+        log("warn", `DNS resolution failed for ${name}: ${error.message}`);
       }
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));

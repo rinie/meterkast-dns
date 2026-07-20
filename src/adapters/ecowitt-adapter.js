@@ -3,6 +3,7 @@
 // versus Dirigera. Verified against the real production API.
 import https from "node:https";
 import { resolveSecretEnv } from "../core/secrets.js";
+import { log } from "../core/log.js";
 
 // Ecowitt wraps success/failure in the body itself, not just HTTP status:
 // {code: 0, msg: "success", data: {...}}. code !== 0 is a real API-level
@@ -83,7 +84,7 @@ export default async function* ecowittAdapter(records, { intervalMs = 60000 } = 
         });
         yield { name, transport: "ecowitt", address: record.address, meta: data };
       } catch (error) {
-        console.error(`Ecowitt reading failed for ${name}:`, error.message);
+        log("warn", `Ecowitt reading failed for ${name}: ${error.message}`);
       }
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));

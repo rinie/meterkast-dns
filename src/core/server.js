@@ -1,6 +1,8 @@
 // The local HTTP API: routing plus every handler. GET /devices,
 // GET /devices/:name, GET /resolved (dns/mdns entries only, normalized to
-// their live-resolved address), GET /events (SSE), POST /devices/:name
+// their live-resolved address), GET /logs (the backend's own recent
+// activity), GET /events (SSE -- "change" events for registry updates,
+// "log" events for new log entries, same connection), POST /devices/:name
 // (generic write path), the static pages (/, /web-scan, /screens), and a
 // generic static-file path for the screens app's own JS/CSS/vendored
 // plugin/handcoded markdown pages.
@@ -9,6 +11,7 @@ import { readFile } from "node:fs/promises";
 import { join, dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listRecords, getRecord, upsertRecord, subscribe } from "./registry.js";
+import { listLogs, subscribeLogs } from "./log.js";
 
 export function handleList(registry, req, res) {
   res.writeHead(200, { "content-type": "application/json" });
@@ -58,6 +61,16 @@ export function handleResolved(registry, req, res) {
   res.end(JSON.stringify(resolved));
 }
 
+// GET /logs -- the backend's own recent activity, timestamped. Same
+// bounded-buffer store live-streamed over /events below (a "log" named
+// event on the same connection, not a second SSE endpoint) -- a log
+// screen loads this once for its initial rows, then the SSE stream
+// appends anything new.
+export function handleLogs(req, res) {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify(listLogs()));
+}
+
 export function handleSubscribe(registry, req, res) {
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -65,10 +78,16 @@ export function handleSubscribe(registry, req, res) {
     connection: "keep-alive",
   });
   res.write(": connected\n\n"); // force headers onto the wire now, not on first event
-  const unsubscribe = subscribe(registry, (event) => {
+  const unsubscribeRegistry = subscribe(registry, (event) => {
     res.write(`event: change\ndata: ${JSON.stringify(event)}\n\n`);
   });
-  req.on("close", unsubscribe);
+  const unsubscribeLog = subscribeLogs((entry) => {
+    res.write(`event: log\ndata: ${JSON.stringify(entry)}\n\n`);
+  });
+  req.on("close", () => {
+    unsubscribeRegistry();
+    unsubscribeLog();
+  });
 }
 
 // POST /devices/:name -- a generic, transport-agnostic write path. The body
@@ -154,6 +173,10 @@ export function createServer(registry) {
 
     if (req.method === "GET" && url.pathname === "/resolved") {
       return handleResolved(registry, req, res);
+    }
+
+    if (req.method === "GET" && url.pathname === "/logs") {
+      return handleLogs(req, res);
     }
 
     if (req.method === "GET" && url.pathname === "/events") {

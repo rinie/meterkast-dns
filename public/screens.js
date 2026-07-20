@@ -18,6 +18,7 @@ import { createGrid } from "/grid.js";
 const PAGES = [
   { slug: "resolved", title: "Resolved Names" },
   { slug: "devices", title: "All Devices" },
+  { slug: "logs", title: "Log" },
 ];
 
 const md = new MarkdownIt();
@@ -71,18 +72,40 @@ function populateFormFromRow(formEl, row) {
   }
 }
 
+// One live EventSource per page load (not per grid -- a page only
+// realistically needs one), closed before the next page's content
+// replaces this one. `config.live` on a ```datatable block names the SSE
+// event to append from (e.g. "log" for GET /events' log-entry events) --
+// `true` is shorthand for "log", the only live source that exists today.
+let liveEventSource = null;
+function closeLiveEventSource() {
+  liveEventSource?.close();
+  liveEventSource = null;
+}
+
 async function mountDataTables(contentEl) {
   const formEl = contentEl.querySelector(".form-grid");
+  const liveTargets = [];
   for (const el of contentEl.querySelectorAll(".datatable-grid")) {
     const config = JSON.parse(el.dataset.config);
     const rows = await fetch(config.endpoint).then((res) => res.json());
     const columns = config.columns?.map((key) => ({ key, label: config.header?.[key] ?? key }));
-    await createGrid(el, rows, {
+    const grid = await createGrid(el, rows, {
       columns,
       sort: config.sort,
       reverse: config.reverse,
+      rowClassKey: config.rowClassKey,
       onSelect: (row) => populateFormFromRow(formEl, row),
     });
+    if (config.live && grid) {
+      liveTargets.push({ liveEvent: config.live === true ? "log" : config.live, grid });
+    }
+  }
+  if (liveTargets.length > 0) {
+    liveEventSource = new EventSource("/events");
+    for (const { liveEvent, grid } of liveTargets) {
+      liveEventSource.addEventListener(liveEvent, (event) => grid.addRow(JSON.parse(event.data)));
+    }
   }
 }
 
@@ -103,6 +126,7 @@ function renderSidebar(activeSlug) {
 }
 
 async function loadPage(slug) {
+  closeLiveEventSource();
   const contentEl = document.getElementById("content");
   contentEl.innerHTML = "Loading...";
   const res = await fetch(`/pages/${slug}.md`);
