@@ -8,6 +8,7 @@ import smartbridgeAdapter, {
   parseSmartbridgeResponse,
   fetchSmartbridgeDevices,
   matchConfiguredDevices,
+  unclaimedSmartbridgeDevices,
 } from "../src/adapters/smartbridge-adapter.js";
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -76,6 +77,30 @@ test("matchConfiguredDevices ignores configured devices the sync response didn't
     "kaku-plug": { transport: "smartbridge", address: "111111" },
   });
   assert.deepEqual(matches, []);
+});
+
+test("unclaimedSmartbridgeDevices returns real devices not matched by any playlist entry, falls back to a device-id-based name (no name field in this API at all)", async () => {
+  const devices = await loadFixture();
+  const configuredRecords = {
+    "kaku-plug": { transport: "smartbridge", address: "222222" },
+  };
+
+  const candidates = unclaimedSmartbridgeDevices(devices, configuredRecords);
+
+  assert.deepEqual(candidates, [
+    {
+      transport: "smartbridge",
+      address: "111111",
+      suggestedName: "smartbridge-111111",
+      meta: {
+        version_status: "0",
+        version_data: "7",
+        time_added: "2025-03-05 17:08:47",
+        encrypted_data: "fake-opaque-ciphertext-1",
+        encrypted_status: null,
+      },
+    },
+  ]);
 });
 
 // Real HTTPS round trip against a local self-signed server, same pattern

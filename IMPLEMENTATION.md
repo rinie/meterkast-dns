@@ -830,6 +830,93 @@ real (gitignored) `device-playlist.toml` afterward — added only to
 exercise the feature, not a permanent change to this device's real
 configuration.
 
+**Next: "I also want to be able to scan for devices not in the playlist
+... and when displayed in a data table the option to select and be added
+to the playlist either with a default chose name, or an entered name."**
+Added `unclaimedDirigeraDevices`/`unclaimedSmartbridgeDevices` (the
+inverse of each adapter's own `matchConfiguredDevices` — every real
+device *not* matched to a playlist entry, with a `suggestedName` derived
+from the device's own `customName` where the API provides one, else a
+`${deviceType}-${id}`/`${transport}-${id}` fallback), a new
+`addPlaylistEntry` in `playlist.js` (reuses `writePlaylist`'s existing
+backup + atomic-write path unchanged), and two new routes:
+`POST /discover/:transport` (an on-demand scan, not a background poll —
+hits the real hub/cloud API once, when a "Scan" button is clicked) and
+`POST /playlist/devices` (claims a candidate under a name, `409` with a
+`suggestedName` on a real collision). A new `/screens/discover` page
+renders each transport's candidates in a datatable with a per-row "Add to
+playlist" action.
+
+**Mid-implementation, wiring the real credentials into `createServer`
+surfaced the exact same URL-vs-string-path bug the `display-fields/`
+directory split had already been fixed for, in a second place**:
+`writePlaylist` uses `node:path`'s `dirname`/`basename`/`extname`, none of
+which accept a `URL` — and `bin/meterkastd.js`'s `playlistPath` has always
+been a `file://` URL by default. This was never exercised before, since
+until `addPlaylistEntry` existed, the live daemon only ever *read* the
+playlist, never wrote it. Fixed the same way as `loadDisplayFields`: both
+`readPlaylist`/`writePlaylist` now normalize a `URL` to a plain string
+path once, before touching the filesystem. A regression test
+(`writePlaylist and readPlaylist both accept a file:// URL`) locks this in.
+
+**Real, end-to-end verification surfaced a second, more consequential real
+issue — not a bug in the new code, a pre-existing limitation of
+`writePlaylist` that had simply never been exercised on a real,
+comment-rich file by the live daemon before**: `POST /playlist/devices`
+round-trips the whole playlist through `smol-toml`'s `parse`+`stringify`,
+which has no concept of comments — every one of `device-playlist.toml`'s
+own hand-written explanatory comments (provenance notes, "swap in
+whichever KAKU device...", etc.) was silently stripped the moment a real
+write happened, and the file's dotted-key style was reformatted into
+`[section]` headers. Nothing was destroyed: `writePlaylist`'s own
+pre-write `snapshotPlaylist` backup captured the original, comment-intact
+file before each write, exactly as designed — but this is a real,
+user-facing cost of using the feature at all, worth stating plainly rather
+than discovering by surprise later. The real file was hand-restored from
+its own backup (comments back, both newly-added real devices —
+`shed-motion`, a motion sensor, added via a raw `curl` call directly
+against `POST /discover/dirigera` + `POST /playlist/devices`; `christmas`,
+an outlet, added through the actual `/screens/discover` browser UI —
+appended in the same dotted-key style) rather than left reformatted.
+Comment preservation across a programmatic write is a real, open
+limitation of this feature, not fixed in this PR (would need a
+comment-preserving TOML writer, a materially bigger change than
+`smol-toml` provides) — see README.md "Honest limits".
+
+**Verifying the browser UI's "Add to playlist" flow found a second real
+bug, this time in the UI code itself, not the backend: the first
+implementation used `window.prompt()` to ask for a name, which is a
+blocking native dialog — clicking "Add to playlist" during verification
+hung this project's own browser-automation tooling outright** (a
+`computer` screenshot call timed out after 30s; `Escape` didn't recover
+it; only a forced `navigate` did). Replaced with an inline `<input>` +
+Save/Cancel rendered directly into the action cell (the same
+direct-DOM-mutation pattern `web-scan.html`'s own status spans already
+use, no new mechanism) — pre-filled with `suggestedName`, submits on Enter
+or Save. Re-verified in the browser after the fix: clicking "Add to
+playlist" on the real "christmas" candidate showed the inline input with
+"christmas" pre-filled, no hang; Save produced a real
+`POST /playlist/devices` call, and the cell's own text changed to "Added
+-- restart meterkastd to start polling this device." — confirmed via the
+page's own rendered text, not just the network response.
+
+**Full real-hub verification**: `POST /discover/dirigera` against the
+real hub returned all 22 devices genuinely present but unclaimed at the
+time (`ShedSensor2`, `Christmas`, `Deur`, `Lucht`, the hub itself as
+`deviceType: "gateway"`, ...), correctly excluding `kitchen-lamp` (already
+claimed). `POST /discover/smartbridge` against the real
+`trustsmartcloud2.com` API returned every ICS2000 device on the account
+except the already-claimed `kaku-plug`, with real (still-undecoded)
+ciphertext in each candidate's `meta`, same honest-fallback shape
+`matchConfiguredDevices` already uses. After claiming `shed-motion` and
+restarting the daemon, `GET /devices/shed-motion` returned real live data
+— `{"customName":"ShedSensor2", "batteryPercentage":20, "isDetected":false, ...}`
+— with the `motionSensor` catalog's curated lines already applied
+correctly (`display: [{"Detected":"Off"},{"Battery":"20.0 %"}]`),
+confirming the whole chain (discover → claim → restart → poll → curate)
+works end to end for a device that was never in the playlist at any
+earlier point in this project's history.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via

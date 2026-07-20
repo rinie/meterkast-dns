@@ -3,10 +3,12 @@
 // their live-resolved address), GET /logs (the backend's own recent
 // activity), GET /events (SSE -- "change" events for registry updates,
 // "log" events for new log entries, same connection), POST /devices/:name
-// (generic write path), the static pages (/screens, /web-scan, /table --
-// / redirects to /screens, the default landing experience), and a
-// generic static-file path for the screens app's own JS/CSS/vendored
-// plugin/handcoded markdown pages.
+// (generic write path), POST /discover/:transport (on-demand scan for
+// real devices not yet in the playlist), POST /playlist/devices (claim a
+// discovered candidate under a name, writes device-playlist.toml), the
+// static pages (/screens, /web-scan, /table -- / redirects to /screens,
+// the default landing experience), and a generic static-file path for the
+// screens app's own JS/CSS/vendored plugin/handcoded markdown pages.
 import { createServer as createHttpServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, dirname, extname, resolve, sep } from "node:path";
@@ -14,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { listRecords, getRecord, upsertRecord, subscribe } from "./registry.js";
 import { listLogs, subscribeLogs } from "./log.js";
 import { flattenDisplayFields, resolveFieldDefs, partitionDisplayLines } from "./display-fields.js";
+import { addPlaylistEntry } from "./playlist.js";
 
 // `display` adds a few curated, formatted lines (display-fields/,
 // keyed by transport, or by transport+deviceType for a hub like Dirigera
@@ -149,6 +152,84 @@ export function handleReport(registry, name, req, res) {
   });
 }
 
+// POST /discover/:transport -- a user-triggered "scan now" for real
+// devices that exist but aren't in the playlist yet (an unrecognized
+// Dirigera device, an unpaired ICS2000 plug, ...). Deliberately not a
+// background poll: this hits the real API on demand, once, when someone
+// clicks Scan on /screens/discover, not every interval forever.
+// `discoverFns` is `{transport: () => Promise<candidate[]>}`, wired up in
+// bin/meterkastd.js (it owns the real credentials/hostnames, same as
+// each adapter's own polling generator does) -- server.js stays
+// transport-agnostic, same as everywhere else in this design, knowing
+// only that a discovery function exists or it doesn't.
+export async function handleDiscover(discoverFns, transport, req, res) {
+  const discoverFn = discoverFns[transport];
+  if (!discoverFn) {
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: `no discovery available for transport "${transport}"` }));
+    return;
+  }
+  try {
+    const candidates = await discoverFn();
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(candidates));
+  } catch (error) {
+    res.writeHead(502, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: error.message }));
+  }
+}
+
+// POST /playlist/devices -- claims a discovered candidate under a real
+// name, writing it into device-playlist.toml (addPlaylistEntry reuses the
+// existing backup + atomic-write path, same as any hand-edit) and into
+// the live registry immediately (shows up in GET /devices right away).
+// Body is `{name, ...record}` -- the same shape a discovery candidate
+// already has, plus the name the user chose or accepted.
+//
+// `pollingStartsAfterRestart: true` is not a caveat this response hides --
+// device-playlist.toml is a start-time config file (runPollingAdapter
+// snapshots the registry once per adapter at boot; see
+// run-polling-adapter.js), so a newly added device's own polling only
+// begins after the daemon restarts. The write and the immediate GET
+// /devices visibility are both real right now; the live polling is not,
+// and the UI says so rather than implying otherwise.
+export function handleAddToPlaylist(registry, playlistPath, req, res) {
+  let body = "";
+  req.on("data", (chunk) => {
+    body += chunk;
+  });
+  req.on("end", async () => {
+    let payload;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid JSON body" }));
+      return;
+    }
+    const { name, ...record } = payload;
+    if (!name) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "name is required" }));
+      return;
+    }
+    try {
+      const added = await addPlaylistEntry(playlistPath, name, record);
+      upsertRecord(registry, name, added);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ record: { name, ...added }, pollingStartsAfterRestart: true }));
+    } catch (error) {
+      if (error.code === "EEXISTS") {
+        res.writeHead(409, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: error.message, suggestedName: error.suggestedName }));
+        return;
+      }
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: error.message }));
+    }
+  });
+}
+
 const PUBLIC_DIR = resolve(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "public"));
 
 export async function serveStaticPage(filename, req, res) {
@@ -189,7 +270,7 @@ export async function serveStaticFile(relativePath, req, res) {
   }
 }
 
-export function createServer(registry, displayFields = {}) {
+export function createServer(registry, displayFields = {}, { playlistPath, discover = {} } = {}) {
   return createHttpServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
 
@@ -228,6 +309,15 @@ export function createServer(registry, displayFields = {}) {
 
     if (req.method === "GET" && url.pathname === "/web-scan") {
       return serveStaticPage("web-scan.html", req, res);
+    }
+
+    const discoverMatch = url.pathname.match(/^\/discover\/([^/]+)$/);
+    if (req.method === "POST" && discoverMatch) {
+      return handleDiscover(discover, decodeURIComponent(discoverMatch[1]), req, res);
+    }
+
+    if (req.method === "POST" && url.pathname === "/playlist/devices") {
+      return handleAddToPlaylist(registry, playlistPath, req, res);
     }
 
     // /screens and /screens/:slug both serve the same shell page --

@@ -128,3 +128,12 @@ body {
 .datatable-grid tbody tr.row-warn { background: #fff3cd !important; }
 .datatable-grid tbody tr.row-warn:hover { background: #ffe9a8 !important; }
 .datatable-grid tbody tr.row-debug { color: #888; }
+
+/* Scan/Connect/Add-to-playlist per-row action buttons and their inline
+   status text -- same class names and look as web-scan.html's own
+   Connect/Read buttons (that file styles them inline since it isn't part
+   of the /screens app), reused here for mountDiscoverGrid's Scan and Add
+   to playlist buttons so both surfaces read as one consistent pattern. */
+.scan-action { font-size: 0.9rem; padding: 0.25rem 0.6rem; margin: 0.5rem 0; }
+.scan-status { font-family: monospace; color: #555; margin-left: 0.5rem; }
+.add-to-playlist-name { font-size: 0.9rem; padding: 0.2rem 0.4rem; width: 10rem; }

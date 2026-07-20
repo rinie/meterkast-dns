@@ -85,6 +85,38 @@ export function matchConfiguredDevices(smartbridgeDevices, configuredRecords) {
   return matches;
 }
 
+// The inverse of matchConfiguredDevices: every real ICS2000 device that
+// isn't already claimed by a playlist entry (`transport: "smartbridge"`
+// records, matched by device id) -- the raw material for
+// GET /discover/smartbridge, a user-triggered scan (see server.js's
+// handleDiscover), not something this adapter's own polling loop calls.
+// Unlike Dirigera, the sync response carries no device name at all
+// (confirmed against the real API -- see the fixture/README's
+// "encrypted `data`/`status`" note for the same honest-fallback
+// reasoning), so `suggestedName` always falls back to
+// `smartbridge-${id}`; there is nothing better to derive it from.
+export function unclaimedSmartbridgeDevices(smartbridgeDevices, configuredRecords) {
+  const claimedIds = new Set(
+    Object.values(configuredRecords)
+      .filter((record) => record.transport === "smartbridge")
+      .map((record) => record.address),
+  );
+  return smartbridgeDevices
+    .filter((device) => !claimedIds.has(device.id))
+    .map((device) => ({
+      transport: "smartbridge",
+      address: device.id,
+      suggestedName: `smartbridge-${device.id}`,
+      meta: {
+        version_status: device.version_status,
+        version_data: device.version_data,
+        time_added: device.time_added,
+        encrypted_data: device.data,
+        encrypted_status: device.status,
+      },
+    }));
+}
+
 // One bulk "sync" call covers every device on the account, same shape as
 // Dirigera -- a poll cycle is a single fetch, matched against configured
 // playlist entries by the ICS2000 device id.

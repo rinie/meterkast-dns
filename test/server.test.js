@@ -1,8 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createRegistry, getRecord, upsertRecord } from "../src/core/registry.js";
-import { handleReport, serveStaticPage, serveStaticFile, handleResolved, summarizeResolution, handleLogs, handleList, handleGet } from "../src/core/server.js";
+import {
+  handleReport,
+  serveStaticPage,
+  serveStaticFile,
+  handleResolved,
+  summarizeResolution,
+  handleLogs,
+  handleList,
+  handleGet,
+  handleDiscover,
+  handleAddToPlaylist,
+} from "../src/core/server.js";
+import { readPlaylist, writePlaylist } from "../src/core/playlist.js";
 import { log } from "../src/core/log.js";
 
 function fakeRequestWithBody(bodyString) {
@@ -295,4 +310,118 @@ test("handleGet narrows display down using a device's own deny-list", () => {
 
   assert.deepEqual(body.display, [{ label: "On", display: "Off" }]);
   assert.deepEqual(body.displayHidden, [{ label: "Brightness", display: "30.0 %" }]);
+});
+
+test("handleDiscover returns a transport's candidates as JSON", async () => {
+  const discoverFns = {
+    dirigera: async () => [{ transport: "dirigera", address: "dev-9", suggestedName: "shed-sensor", meta: {} }],
+  };
+  const res = fakeResponse();
+
+  await handleDiscover(discoverFns, "dirigera", {}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body), [{ transport: "dirigera", address: "dev-9", suggestedName: "shed-sensor", meta: {} }]);
+});
+
+test("handleDiscover responds 404 for a transport with no discovery function wired up", async () => {
+  const res = fakeResponse();
+  await handleDiscover({}, "dns", {}, res);
+  assert.equal(res.statusCode, 404);
+});
+
+test("handleDiscover responds 502 when the discovery function itself fails (a real network/credential error, not a bug)", async () => {
+  const discoverFns = { dirigera: async () => { throw new Error("DIRIGERA_HOSTNAME is not set"); } };
+  const res = fakeResponse();
+
+  await handleDiscover(discoverFns, "dirigera", {}, res);
+
+  assert.equal(res.statusCode, 502);
+  assert.deepEqual(JSON.parse(res.body), { error: "DIRIGERA_HOSTNAME is not set" });
+});
+
+test("handleAddToPlaylist writes a real entry to disk (backup + atomic write, same as any hand-edit) and upserts it into the live registry immediately", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "meterkast-"));
+  const playlistPath = join(dir, "device-playlist.toml");
+  try {
+    await writePlaylist(playlistPath, { "kitchen-lamp": { transport: "dirigera", address: "dev-1" } });
+    const registry = createRegistry();
+    upsertRecord(registry, "kitchen-lamp", { transport: "dirigera", address: "dev-1" });
+
+    const req = fakeRequestWithBody(
+      JSON.stringify({ name: "shed-sensor", transport: "dirigera", address: "dev-9", deviceType: "motionSensor" }),
+    );
+    const res = fakeResponse();
+    await new Promise((resolve) => {
+      const originalEnd = res.end.bind(res);
+      res.end = (body) => {
+        originalEnd(body);
+        resolve();
+      };
+      handleAddToPlaylist(registry, playlistPath, req, res);
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.pollingStartsAfterRestart, true);
+    assert.equal(body.record.name, "shed-sensor");
+
+    const onDisk = await readPlaylist(playlistPath);
+    assert.deepEqual(onDisk["shed-sensor"], { transport: "dirigera", address: "dev-9", deviceType: "motionSensor" });
+    assert.deepEqual(getRecord(registry, "shed-sensor"), {
+      name: "shed-sensor",
+      transport: "dirigera",
+      address: "dev-9",
+      deviceType: "motionSensor",
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("handleAddToPlaylist responds 400 when the body has no name", async () => {
+  const registry = createRegistry();
+  const req = fakeRequestWithBody(JSON.stringify({ transport: "dirigera", address: "dev-9" }));
+  const res = fakeResponse();
+
+  await new Promise((resolve) => {
+    const originalEnd = res.end.bind(res);
+    res.end = (body) => {
+      originalEnd(body);
+      resolve();
+    };
+    handleAddToPlaylist(registry, "/unused", req, res);
+  });
+
+  assert.equal(res.statusCode, 400);
+});
+
+test("handleAddToPlaylist responds 409 with a suggestedName on a real collision, leaves the playlist and registry untouched", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "meterkast-"));
+  const playlistPath = join(dir, "device-playlist.toml");
+  try {
+    await writePlaylist(playlistPath, { "shed-sensor": { transport: "dirigera", address: "dev-1" } });
+    const registry = createRegistry();
+    upsertRecord(registry, "shed-sensor", { transport: "dirigera", address: "dev-1" });
+
+    const req = fakeRequestWithBody(JSON.stringify({ name: "shed-sensor", transport: "dirigera", address: "dev-9" }));
+    const res = fakeResponse();
+    await new Promise((resolve) => {
+      const originalEnd = res.end.bind(res);
+      res.end = (body) => {
+        originalEnd(body);
+        resolve();
+      };
+      handleAddToPlaylist(registry, playlistPath, req, res);
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.body).suggestedName, "shed-sensor-2");
+    assert.deepEqual(getRecord(registry, "shed-sensor"), { name: "shed-sensor", transport: "dirigera", address: "dev-1" });
+
+    const onDisk = await readPlaylist(playlistPath);
+    assert.deepEqual(onDisk["shed-sensor"], { transport: "dirigera", address: "dev-1" });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
