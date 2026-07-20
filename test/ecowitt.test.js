@@ -13,8 +13,8 @@ test("parseEcowittResponse extracts .data on success (code 0)", async () => {
     await readFile(join(FIXTURES_DIR, "ecowitt-real-time-response.json"), "utf8"),
   );
   const result = parseEcowittResponse(200, JSON.stringify(fixture));
-  assert.equal(result.outdoor.temperature.value, "72.7");
-  assert.equal(result.outdoor.temperature.unit, "ºF");
+  assert.equal(result.outdoor.temperature.value, "20.5");
+  assert.equal(result.outdoor.temperature.unit, "℃");
 });
 
 test("parseEcowittResponse throws on a non-200 HTTP status", () => {
@@ -57,10 +57,13 @@ test("fetchEcowittReading performs a real HTTPS request and returns .data", asyn
       { hostname: "127.0.0.1", applicationKey: "test-app-key", apiKey: "test-api-key", mac: "AA:BB" },
       { port, rejectUnauthorized: false },
     );
-    assert.equal(result.indoor.humidity.value, "47");
+    assert.equal(result.indoor.humidity.value, "44");
     assert.match(receivedPath, /^\/api\/v3\/device\/real_time\?/);
     assert.match(receivedPath, /application_key=test-app-key/);
     assert.match(receivedPath, /mac=AA%3ABB/);
+    // Confirmed empirically against the real API: omitting this falls
+    // back to Fahrenheit (temp_unitid=2) regardless of account settings.
+    assert.match(receivedPath, /temp_unitid=1/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

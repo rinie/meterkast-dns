@@ -33,6 +33,12 @@ export function fetchEcowittReading(
       api_key: apiKey,
       mac,
       call_back: "all",
+      // Confirmed empirically against the real API: temp_unitid=2
+      // (Fahrenheit) is the server's own default when this is omitted,
+      // regardless of any unit preference set in the Ecowitt account/app
+      // -- 1 requests Celsius explicitly rather than relying on that
+      // default.
+      temp_unitid: "1",
     });
     const req = https.request(
       {
