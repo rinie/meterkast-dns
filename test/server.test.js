@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createRegistry, getRecord, upsertRecord } from "../src/core/registry.js";
-import { handleReport, serveStaticPage, handleResolved, summarizeResolution } from "../src/core/server.js";
+import { handleReport, serveStaticPage, serveStaticFile, handleResolved, summarizeResolution } from "../src/core/server.js";
 
 function fakeRequestWithBody(bodyString) {
   const req = new EventEmitter();
@@ -124,4 +124,36 @@ test("handleResolved lists only dns/mdns records that actually resolved", () => 
     { name: "raspi3", transport: "dns", address: "raspi3.home", resolvedAddress: "192.168.1.53" },
     { name: "mqtt-broker", transport: "mdns", address: "_mqtt._tcp.local", resolvedAddress: "10.1.2.3:1883" },
   ]);
+});
+
+test("serveStaticFile serves a real file under public/ with the right content-type", async () => {
+  const res = fakeResponse();
+  await serveStaticFile("screens.js", {}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["content-type"], "text/javascript; charset=utf-8");
+  assert.match(res.body.toString(), /createGrid/);
+});
+
+test("serveStaticFile serves a handcoded page as markdown", async () => {
+  const res = fakeResponse();
+  await serveStaticFile("pages/resolved.md", {}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["content-type"], "text/markdown; charset=utf-8");
+  assert.match(res.body.toString(), /:::form/);
+});
+
+test("serveStaticFile responds 404 for a file that doesn't exist", async () => {
+  const res = fakeResponse();
+  await serveStaticFile("pages/nonexistent.md", {}, res);
+
+  assert.equal(res.statusCode, 404);
+});
+
+test("serveStaticFile rejects a path-traversal attempt with 403, never reads outside public/", async () => {
+  const res = fakeResponse();
+  await serveStaticFile("../package.json", {}, res);
+
+  assert.equal(res.statusCode, 403);
 });

@@ -1,0 +1,151 @@
+/**
+ * markdown-it-form stylesheet
+ * Drop into your Observable Framework project as src/styles/form.css
+ * or import in observablehq.config.js
+ */
+
+/* Grid container */
+.form-grid {
+  display: grid;
+  gap: var(--form-gap, 0.75rem 1rem);
+  align-items: start;
+  margin-block: 1rem;
+}
+
+/* Individual cell */
+.form-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.form-cell--empty {
+  /* invisible spacer */
+}
+
+/* Label */
+.form-field label,
+.form-field .form-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--theme-foreground-muted, #555);
+}
+
+.form-required {
+  color: var(--form-required-color, #c00);
+  margin-left: 0.2em;
+}
+
+/* Text input */
+.form-field input[type="text"] {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--form-border, #ccc);
+  border-radius: var(--form-radius, 4px);
+  font-size: 0.95rem;
+  background: var(--form-input-bg, #fff);
+  color: var(--theme-foreground, #000);
+  box-sizing: border-box;
+}
+
+.form-field input[type="text"]:focus {
+  outline: 2px solid var(--form-focus, #4a90d9);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+/* Select */
+.form-field select {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--form-border, #ccc);
+  border-radius: var(--form-radius, 4px);
+  font-size: 0.95rem;
+  background: var(--form-input-bg, #fff);
+  color: var(--theme-foreground, #000);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+/* Radio group */
+.form-field--radio .form-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding-top: 0.1rem;
+}
+
+.form-radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+/* Checkbox */
+.form-field--checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.form-field--checkbox input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.form-field--checkbox label {
+  font-size: 0.95rem;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+/* Readonly */
+.form-field--readonly .form-value {
+  font-size: 0.95rem;
+  color: var(--theme-foreground-muted, #555);
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed var(--form-border, #ccc);
+  min-height: 1.5rem;
+  display: block;
+}
+
+/* Required indicator on inputs */
+.form-field input:required,
+.form-field select:required {
+  border-left: 3px solid var(--form-required-color, #c00);
+}
+
+/* Disabled - a real, greyed-out interactive control (input/select/radio
+   still present with the HTML `disabled` attribute), distinct from
+   `.form-field--readonly` above, which drops the control entirely. */
+.form-field--disabled label,
+.form-field--disabled .form-label {
+  color: var(--theme-foreground-faint, #999);
+}
+
+.form-field--disabled input,
+.form-field--disabled select {
+  background: var(--form-disabled-bg, #f2f2f2);
+  color: var(--theme-foreground-faint, #999);
+  cursor: not-allowed;
+}
+
+.form-field--disabled input[type="checkbox"],
+.form-field--disabled .form-radio-option {
+  cursor: not-allowed;
+}
+
+/* Responsive: collapse to single column on narrow screens */
+@media (max-width: 480px) {
+  .form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .form-cell[style*="grid-column"] {
+    grid-column: 1 !important;
+  }
+}
