@@ -40,6 +40,7 @@ src/
     run-polling-adapter.js    # shared wiring: check transport, run, upsert
     offsite.js                 # git-backed offsite sync: init, commit, push, orchestrate
     log.js                      # bounded timestamped log buffer + subscribe -- see README.md
+    display-fields.js            # dot-path resolve + comma-decimal format, driven by display-fields.toml
     server.js                   # createServer + every route handler + static-page serving
   adapters/
     load-adapters.js            # dynamic import() loader
@@ -66,6 +67,7 @@ test/
   mdns.test.js
   dns-adapter.test.js
   log.test.js
+  display-fields.test.js
   run-polling-adapter.test.js
   fixtures/
     test-cert.pem                    # throwaway self-signed cert for HTTPS tests
@@ -94,6 +96,7 @@ public/
       README.md                  # provenance: exact upstream commit vendored
 device-playlist.example.toml     # fixture/template, committed
 device-playlist.toml             # the real Use-editable data file, gitignored
+display-fields.toml              # curated per-transport display lines -- committed, see README.md
 backups/                         # dated snapshots, written automatically, gitignored
                                   # -- itself its own git repo, pushed offsite
 .env                             # real secret values, gitignored, never committed
@@ -188,6 +191,11 @@ backups/                         # dated snapshots, written automatically, gitig
   in-progress fork used while building an earlier, unrelated prototype —
   confirmed identical in substance (only comment wording differed) before
   trusting it.
+- **`display-fields.js` needs no dependency either** — `smol-toml` (the
+  project's only real dependency) already parses `display-fields.toml`'s
+  array-of-tables syntax with no code changes; the dot-path resolver and
+  comma-decimal formatter are both a handful of lines with no library
+  behind them.
 - **WebBLE/WebUSB/WebHID — the only BLE/USB/HID path now** — `handleReport`
   (in `src/core/server.js`) adds a generic `POST /devices/:name`,
   deliberately transport-agnostic (it stores whatever record it's given, no
@@ -610,6 +618,39 @@ against the real API with the fix in place (real Celsius values, not
 hand-edited), and the real daemon confirmed it end to end:
 `GET /devices/weather-station` now returns `{"unit":"℃","value":"20.5"}`
 for a real, live reading.
+
+**A follow-up question ("get the Indoor temperature is 23,7 C") asked for
+the display half of the same story — `display-fields.toml` and
+`src/core/display-fields.js`, and this one caught a real bug too.**
+`handleList`/`handleGet` now add a `display` array (curated
+`{label, display}` lines) alongside a record's raw `meta`, computed from
+`display-fields.toml`'s per-transport mapping — unit tested (path
+resolution, missing-path skip, number formatting, the
+graceful-degradation empty-object shape for a missing file, same as
+`readPlaylist`) and confirmed against the real live daemon:
+`GET /devices/weather-station` returned real `Indoor Temperature: 23.5 ℃`
+alongside the other three curated lines. (Number formatting went through
+one real revision worth recording: first built with a comma decimal
+separator, mirroring the physical console the request referenced; a
+direct follow-up ("keep the decimal dot ... internally and external
+display") corrected that — `formatNumber` now uses `toFixed(1)`, a plain
+period decimal with no locale involved at all, everywhere, not just
+internally. Saved as a standing preference for future work in this and
+other projects, not just this one call site.) **Wiring it into the actual
+`/screens/devices` page surfaced a real bug, not caught by any unit
+test**: `devices.md`'s `<div id="display-fields">` placeholder — plain
+raw HTML in a markdown file, expected to pass through unchanged — was
+silently being HTML-*escaped* into visible literal text instead, because
+`markdown-it`'s own default (`html: false`) disables raw HTML passthrough
+for untrusted input, and `getMarkdownIt()` never overrode it. Fixed by
+constructing `new MarkdownIt({ html: true })` — safe here specifically
+because `pages/*.md` files are hand-authored by whoever runs this server,
+the same trust level as any other file in this repo, not arbitrary or
+remote input. Re-verified live after the fix: `#display-fields` is a real
+element, selecting `weather-station` renders all four real lines
+correctly, selecting a device with no mapping configured (`kitchen-lamp`,
+`dirigera`) correctly clears the panel instead of showing stale lines,
+and zero console errors throughout.
 
 **All three of Dirigera, Ecowitt, and Smartbridge are now verified against
 the real service, not just a local mock — the same tier for all three, not

@@ -43,7 +43,15 @@ function getMarkdownIt() {
         import("https://cdn.jsdelivr.net/npm/markdown-it@14/+esm"),
         import("/vendor/observable-forms/markdown-it-form.js"),
       ]);
-      const md = new MarkdownIt();
+      // html: true -- pages/*.md files are hand-authored by whoever runs
+      // this server, the same trust level as any other file in this
+      // repo, not arbitrary/remote input; markdown-it's default (false)
+      // is meant for untrusted markdown, which doesn't apply here. A
+      // real bug found by testing: without this, devices.md's raw
+      // <div id="display-fields"> was silently HTML-escaped into visible
+      // literal text instead of a real element -- populateDisplayFields
+      // below had nothing to render into.
+      const md = new MarkdownIt({ html: true });
       markdownItForm(md);
 
       // ```datatable fence -- the one piece of markdown syntax this app
@@ -101,6 +109,29 @@ function populateFormFromRow(formEl, row) {
   }
 }
 
+// A row's `display` -- a few curated, pre-formatted lines from
+// display-fields.toml (see src/core/display-fields.js), e.g. "Indoor
+// Temperature: 23,5 ℃" -- rendered as plain text lines into a page's own
+// <div id="display-fields">, not through observable-forms' :::form
+// grammar: unlike a form's fixed field set, which lines exist varies by
+// transport (an Ecowitt device gets four, a Dirigera one gets none today),
+// which doesn't fit a static field list. A transport with no mapping
+// configured, or a row with no `display` array at all, just clears the
+// container -- not every device has curated lines to show.
+function populateDisplayFields(contentEl, row) {
+  const container = contentEl.querySelector("#display-fields");
+  if (!container) return;
+  container.innerHTML = "";
+  for (const { label, display } of row?.display ?? []) {
+    const line = document.createElement("div");
+    line.className = "display-field-line";
+    const strong = document.createElement("strong");
+    strong.textContent = `${label}:`;
+    line.append(strong, ` ${display}`);
+    container.append(line);
+  }
+}
+
 // One live EventSource per page load (not per grid -- a page only
 // realistically needs one), closed before the next page's content
 // replaces this one. `config.live` on a ```datatable block names the SSE
@@ -124,7 +155,10 @@ async function mountDataTables(contentEl) {
       sort: config.sort,
       reverse: config.reverse,
       rowClassKey: config.rowClassKey,
-      onSelect: (row) => populateFormFromRow(formEl, row),
+      onSelect: (row) => {
+        populateFormFromRow(formEl, row);
+        populateDisplayFields(contentEl, row);
+      },
     });
     if (config.live && grid) {
       liveTargets.push({ liveEvent: config.live === true ? "log" : config.live, grid });
