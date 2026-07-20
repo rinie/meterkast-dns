@@ -330,6 +330,44 @@ real OS picker opening is verified; a real USB or HID device plugged in or
 paired is needed to verify anything past that, same as the still-open gap
 for Dirigera-style real-hardware testing elsewhere in this document.
 
+**`web-scan.html`'s three sections were converted to the same DataTables
+grid `/screens` uses, and this conversion caught a real concurrency bug
+in `grid.js` that unit tests never would have — it only shows up with
+multiple concurrent grids on one page.** `renderTargetsGrid` replaced the
+old plain button-list rendering with `createGrid`, keeping every line of
+`connectAndReadBle`/`connectAndReadUsb`/`connectAndListenHid`/
+`reportReading`/the decode functions untouched — only the render/wiring
+layer changed. Loaded for real: all three grids rendered with real
+playlist data and correct columns (BLE's `service`/`characteristic`,
+USB's `interfaceNumber`/`endpointNumber`), zero console errors. **But the
+BLE and USB grids were initially empty — no table, no error, no
+empty-state message — while HID alone rendered.** The cause:
+`createGrid`'s "supersede a stale render" guard used one
+module-`let renderToken = 0` counter shared across every call, not one
+per container. `main()` calls `renderTargetsGrid` for BLE, then USB, then
+HID without awaiting between them; each call's own `++renderToken`
+silently invalidated the *previous* container's still-pending render
+too, not just a genuinely superseded render of the *same* container — so
+only the last of the three ever survived its own check. This never
+surfaced on the `/screens` pages because `mountDataTables`'s loop awaits
+each `createGrid` call before starting the next one, so the counter is
+never live for more than one container at a time there. Fixed by keying
+the guard per container (`WeakMap<container, token>` instead of one
+shared counter) — re-verified live: all three grids render correctly.
+Separately, the new per-row `onAction` wiring (a real `<button
+data-action="connect">` in a render-only column, resolved back to its
+row via DataTables' own `table.row(tr).data()`) was confirmed correct by
+dispatching a real `.click()` on it: `connectAndReadBle` ran and
+`requestDevice()` correctly hit the browser's own gesture guard
+(`SecurityError: Must be handling a user gesture...`) — the exact,
+expected real behavior for a non-trusted synthetic click, proving the
+handler reaches the real WebBLE call rather than silently no-op'ing. A
+synthesized-gesture `computer`-tool click on the same button did not
+produce a visible status update in this pass; unlike the `.click()` test
+above, that result is inconclusive rather than a confirmed failure, and
+wasn't chased further given the underlying wiring was already proven
+correct by the scripted-click test.
+
 **The mDNS/DNS-SD adapter is real, tested against a real (if local) wire
 protocol, and hit one honest, specific gap trying to go further.**
 `isServiceQuery` and `decodeTxt` are pure and unit tested.
