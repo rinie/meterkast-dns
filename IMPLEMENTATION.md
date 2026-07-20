@@ -721,6 +721,58 @@ adapter test in this project does, since this specific fix lives in the
 polling loop itself. Re-verified against the real live daemon afterward:
 both adapters still return real, live data with no regression.
 
+**A follow-up question ("how would you handle dirigera with just my
+specific kitchenlight?") extended `display-fields.toml` to Dirigera, and
+the design went through a real, caught-before-implementation correction.**
+The first draft keyed Dirigera's display fields by device *name*
+(`[[displayFields.devices.kitchen-lamp]]`), directly mirroring how the
+question was phrased. The user caught the flaw immediately: "But that
+ties the display fields to the device playlist doesn't it?" — correct.
+`display-fields.toml` is committed, not gitignored, specifically because
+it's generic and shareable; keying it by a Use-chosen device name would
+have made it exactly as personal as `device-playlist.toml`, defeating the
+reason it's a separate file at all. Redesigned around `deviceType`
+instead — a structural property Dirigera's own API already provides
+(`device.deviceType`: `light`, `outlet`, `motionSensor`, ...), confirmed
+as the right precedent by the user's own analogy: "Like the LIRC remote
+mapping" — LIRC's `.conf` files are keyed by remote *model*, a shared
+catalog, never by which specific physical remote a user owns.
+
+Before writing any code, the mixed TOML shape (a flat array for Ecowitt
+alongside a `deviceType`-nested table for Dirigera, both under the same
+`displayFields` key) was verified to actually parse correctly with a real
+`smol-toml.parse()` call, not assumed. Then, before committing any
+Dirigera field definitions, a real API call against the live hub
+(`fetchDirigeraDevices`, reusing the adapter's own tested function)
+enumerated one real device per `deviceType` present on the account —
+`light`, `outlet`, `motionSensor`, `openCloseSensor`, `waterSensor`,
+`environmentSensor`, `lightSensor`, `lightController`, `gateway`,
+`repeater` — and captured each one's actual `attributes` object. Six of
+those (the common actuator/sensor cases) became the committed
+`[[displayFields.dirigera.<type>]]` entries; the rest were left out
+rather than guessed, with a comment noting they can be added the same way
+once verified. This is also where `format = "boolean"` and a literal
+`unit` string (as opposed to `unitPath`) were added to
+`flattenDisplayFields` — Dirigera's `isOn`/`isOpen`/etc. are real
+booleans with no unit at all, and `lightLevel`'s `%` has no sibling field
+in the API response the way Ecowitt's `unit` fields do.
+
+`matchConfiguredDevices` in `dirigera-adapter.js` now surfaces
+`deviceType` as a peer field alongside `meta` (not folded into it), and
+`server.js`'s `withDisplay` resolves field definitions through a new
+`resolveFieldDefs(displayFields, transport, deviceType)` — a flat array
+(Ecowitt) is returned as-is, an object (Dirigera) is looked up by
+`deviceType`. Verified against the real live daemon and the real
+`kitchen-lamp` (a real `TRADFRI Driver 10W`, `deviceType: "light"`):
+`GET /devices/kitchen-lamp` returned `"display":[{"label":"On","display":
+"Off"},{"label":"Brightness","display":"70.0 %"}]`, matching the light's
+real live `isOn: false`/`lightLevel: 70`. Confirmed in the browser too:
+selecting `kitchen-lamp` on `/screens/devices` renders `On: Off` /
+`Brightness: 70.0 %` above the raw `meta`, while `weather-station`
+(Ecowitt, the pre-existing flat-array path) continues to render its four
+lines unchanged alongside it — both lookup shapes verified live, side by
+side, not just in isolation.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via

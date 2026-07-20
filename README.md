@@ -746,6 +746,50 @@ it's a sensible default for anyone using the same integration. `/screens/devices
 detail panel renders these lines above the raw `meta`, never instead of
 it — the full reading is always one click away.
 
+Ecowitt's API always answers the same shape, so `displayFields.ecowitt`
+is a flat array. A hub like Dirigera doesn't — one hub fans out to
+structurally different device types (a light's `isOn`/`lightLevel` mean
+nothing for a door sensor's `isOpen`), so `displayFields.dirigera` is
+instead a table keyed by `deviceType`:
+
+```toml
+[[displayFields.dirigera.light]]
+label     = "On"
+valuePath = "isOn"
+format    = "boolean"
+
+[[displayFields.dirigera.light]]
+label     = "Brightness"
+valuePath = "lightLevel"
+unit      = "%"
+```
+
+`deviceType` (`light`, `outlet`, `motionSensor`, ...) is Dirigera's own
+structural classification of the device — `matchConfiguredDevices` in
+`dirigera-adapter.js` surfaces it verbatim as `device.deviceType`, a peer
+field alongside `meta`, not folded into it. `resolveFieldDefs` in
+`display-fields.js` picks the right shape: a flat array is returned as-is
+(Ecowitt), an object is looked up by `deviceType` (Dirigera). Two new
+field shapes support this: a literal `unit` string (Dirigera has no
+per-reading unit field to point at the way Ecowitt does — `lightLevel` is
+always `%`, so it's written directly rather than as a `unitPath`) and
+`format = "boolean"` (renders `isOn`/`isOpen`/etc as `On`/`Off` instead of
+running them through the numeric formatter). All six deviceType examples
+committed (`light`, `outlet`, `motionSensor`, `openCloseSensor`,
+`waterSensor`, `environmentSensor`) are verified against a real Dirigera
+hub's real attributes, not guessed from API docs — see IMPLEMENTATION.md.
+
+The key design question was *what* to key the Dirigera table by. The
+first draft keyed it by device *name* (`kitchen-lamp`), which collapses
+under its own logic: `display-fields.toml` is committed specifically
+because it's generic and shareable, and a device name is neither — it's
+the same personal, Use-chosen identifier `device-playlist.toml` already
+owns. `deviceType` is a structural, API-provided property instead, so
+keying by it keeps the file generic: anyone with a Dirigera hub gets a
+working `light` mapping without editing anything, the same way LIRC's own
+remote `.conf` files are keyed by remote *model* — a shared, community-
+maintained catalog — never by which specific physical remote a user owns.
+
 This is a composition problem more than an invention problem — most of the
 pieces already exist somewhere, just not connected:
 

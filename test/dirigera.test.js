@@ -21,10 +21,10 @@ test("parseDirigeraResponse throws on a non-200 status", () => {
   assert.throws(() => parseDirigeraResponse(401, "{}"), /Dirigera API returned 401/);
 });
 
-test("matchConfiguredDevices matches dirigera-transport records by device id", () => {
+test("matchConfiguredDevices matches dirigera-transport records by device id, surfaces deviceType alongside meta", () => {
   const dirigeraDevices = [
-    { id: "dev-1", attributes: { isOn: true, lightLevel: 75 } },
-    { id: "dev-2", attributes: { isOn: false } },
+    { id: "dev-1", deviceType: "light", attributes: { isOn: true, lightLevel: 75 } },
+    { id: "dev-2", deviceType: "outlet", attributes: { isOn: false } },
   ];
   const configuredRecords = {
     "kitchen-lamp": { transport: "dirigera", address: "dev-1" },
@@ -35,8 +35,8 @@ test("matchConfiguredDevices matches dirigera-transport records by device id", (
   const matches = matchConfiguredDevices(dirigeraDevices, configuredRecords);
 
   assert.deepEqual(matches, [
-    { name: "kitchen-lamp", transport: "dirigera", address: "dev-1", meta: { isOn: true, lightLevel: 75 } },
-    { name: "hallway-lamp", transport: "dirigera", address: "dev-2", meta: { isOn: false } },
+    { name: "kitchen-lamp", transport: "dirigera", address: "dev-1", deviceType: "light", meta: { isOn: true, lightLevel: 75 } },
+    { name: "hallway-lamp", transport: "dirigera", address: "dev-2", deviceType: "outlet", meta: { isOn: false } },
   ]);
 });
 
@@ -120,7 +120,7 @@ test("dirigeraAdapter survives a failed poll cycle and yields on the next succes
   const fetchDevices = async () => {
     callCount += 1;
     if (callCount === 1) throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
-    return [{ id: "dev-1", attributes: { isOn: true } }];
+    return [{ id: "dev-1", deviceType: "light", attributes: { isOn: true } }];
   };
   const records = { "kitchen-lamp": { transport: "dirigera", address: "dev-1" } };
   const generator = dirigeraAdapter(records, { intervalMs: 5, fetchDevices });
@@ -128,7 +128,13 @@ test("dirigeraAdapter survives a failed poll cycle and yields on the next succes
   try {
     const { value, done } = await generator.next();
     assert.equal(done, false);
-    assert.deepEqual(value, { name: "kitchen-lamp", transport: "dirigera", address: "dev-1", meta: { isOn: true } });
+    assert.deepEqual(value, {
+      name: "kitchen-lamp",
+      transport: "dirigera",
+      address: "dev-1",
+      deviceType: "light",
+      meta: { isOn: true },
+    });
     assert.equal(callCount, 2); // first cycle failed and was caught; this yield came from the second
   } finally {
     await generator.return();

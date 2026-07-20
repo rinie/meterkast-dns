@@ -208,3 +208,39 @@ test("handleGet includes the same curated display lines for a single record", ()
 
   assert.deepEqual(JSON.parse(res.body).display, [{ label: "Indoor Temperature", display: "23.5 ℃" }]);
 });
+
+test("handleGet resolves display fields by transport+deviceType for a hub like Dirigera, keeps a flat transport like Ecowitt working", () => {
+  const registry = createRegistry();
+  upsertRecord(registry, "kitchen-lamp", {
+    transport: "dirigera",
+    address: "dev-1",
+    deviceType: "light",
+    meta: { isOn: true, lightLevel: 70 },
+  });
+  upsertRecord(registry, "front-door", {
+    transport: "dirigera",
+    address: "dev-2",
+    deviceType: "openCloseSensor",
+    meta: { isOpen: false },
+  });
+  const displayFields = {
+    dirigera: {
+      light: [
+        { label: "On", valuePath: "isOn", format: "boolean" },
+        { label: "Brightness", valuePath: "lightLevel", unit: "%" },
+      ],
+      openCloseSensor: [{ label: "Open", valuePath: "isOpen", format: "boolean" }],
+    },
+  };
+
+  const lampRes = fakeResponse();
+  handleGet(registry, displayFields, "kitchen-lamp", {}, lampRes);
+  assert.deepEqual(JSON.parse(lampRes.body).display, [
+    { label: "On", display: "On" },
+    { label: "Brightness", display: "70.0 %" },
+  ]);
+
+  const doorRes = fakeResponse();
+  handleGet(registry, displayFields, "front-door", {}, doorRes);
+  assert.deepEqual(JSON.parse(doorRes.body).display, [{ label: "Open", display: "Off" }]);
+});

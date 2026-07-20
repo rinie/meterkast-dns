@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { flattenDisplayFields, loadDisplayFields } from "../src/core/display-fields.js";
+import { flattenDisplayFields, loadDisplayFields, resolveFieldDefs } from "../src/core/display-fields.js";
 
 const ECOWITT_META = {
   indoor: {
@@ -53,6 +53,37 @@ test("loadDisplayFields reads and parses a real file", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("flattenDisplayFields renders format:'boolean' as On/Off regardless of unitPath/unit", () => {
+  const fieldDefs = [{ label: "On", valuePath: "isOn", format: "boolean" }];
+  assert.deepEqual(flattenDisplayFields(fieldDefs, { isOn: true }), [{ label: "On", display: "On" }]);
+  assert.deepEqual(flattenDisplayFields(fieldDefs, { isOn: false }), [{ label: "On", display: "Off" }]);
+});
+
+test("flattenDisplayFields uses a literal `unit` string when there's no unitPath -- Dirigera's lightLevel has no unit field to point at", () => {
+  const fieldDefs = [{ label: "Brightness", valuePath: "lightLevel", unit: "%" }];
+  assert.deepEqual(flattenDisplayFields(fieldDefs, { lightLevel: 70 }), [{ label: "Brightness", display: "70.0 %" }]);
+});
+
+test("resolveFieldDefs returns a flat array transport (Ecowitt) unchanged, ignoring deviceType", () => {
+  const displayFields = { ecowitt: [{ label: "Indoor Temperature", valuePath: "indoor.temperature.value" }] };
+  assert.deepEqual(resolveFieldDefs(displayFields, "ecowitt", undefined), displayFields.ecowitt);
+});
+
+test("resolveFieldDefs looks up by deviceType for a transport keyed that way (Dirigera)", () => {
+  const displayFields = {
+    dirigera: {
+      light: [{ label: "On", valuePath: "isOn", format: "boolean" }],
+      outlet: [{ label: "On", valuePath: "isOn", format: "boolean" }],
+    },
+  };
+  assert.deepEqual(resolveFieldDefs(displayFields, "dirigera", "light"), displayFields.dirigera.light);
+  assert.equal(resolveFieldDefs(displayFields, "dirigera", "motionSensor"), undefined);
+});
+
+test("resolveFieldDefs returns undefined for an unconfigured transport", () => {
+  assert.equal(resolveFieldDefs({}, "bluetooth", undefined), undefined);
 });
 
 test("loadDisplayFields returns {} when the file doesn't exist, same graceful-degradation shape as readPlaylist", async () => {
