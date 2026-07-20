@@ -74,14 +74,15 @@ test/
     smartbridge-sync-response.json   # real response shape, IDs genericized
   run-all.js                     # see "Testing" below
 public/
-  index.html                     # GET / -- device table, live via SSE, links to web-scan/screens
+  index.html                     # GET /table -- classic device table, live via SSE
   web-scan.html                  # WebBLE/WebUSB/WebHID page -- see README.md
-  screens.html                   # GET /screens shell -- sidebar + content area
+  screens.html                   # GET /screens shell (also GET / -- see below) -- sidebar + content area
   screens.js                     # sidebar/router, markdown-it + observable-forms setup,
                                   # the ```datatable fence rule, row-select -> form population
   screens.css                    # sidebar/content layout + DataTables density (ported sizes)
   grid.js                        # DataTables adapter -- see README.md "Browsing the resolver"
   pages/
+    index.md                     # bare /screens' own home page -- overview + links, not a PAGES entry
     resolved.md                  # handcoded screen: GET /resolved
     devices.md                   # handcoded screen: GET /devices
     logs.md                      # handcoded screen: GET /logs, live via SSE
@@ -196,12 +197,26 @@ backups/                         # dated snapshots, written automatically, gitig
   `navigator.bluetooth`/`navigator.usb`/`navigator.hid` calls and byte
   decoding happen, client-side, since none of those APIs exist in Node at
   all.
-- **One static-page handler for both pages** — `serveStaticPage` (in
+- **One static-page handler for every page** — `serveStaticPage` (in
   `src/core/server.js`) takes a filename and serves it from `public/`, used
-  for both `GET /` (`index.html`) and `GET /web-scan` (`web-scan.html`). A
-  second nearly identical function existed briefly when `web-scan.html` was
-  the only page; consolidated rather than copy-pasted once a second page
-  needed the exact same "read a file, serve as HTML" logic.
+  for `GET /table` (`index.html`), `GET /web-scan` (`web-scan.html`), and
+  `GET /screens`/`GET /screens/:slug` (`screens.html`). A second nearly
+  identical function existed briefly when `web-scan.html` was the only
+  page; consolidated rather than copy-pasted once a second page needed
+  the exact same "read a file, serve as HTML" logic.
+- **`GET /` is a real `302` redirect to `/screens`, not a served page** —
+  a real user report (`http://localhost:8420/` showing no sidebar) traced
+  back to the plain root having always served the older `index.html`
+  directly, which never had a sidebar at all; the fix people actually
+  wanted was the *default* landing on the screens app, not a rendering
+  bug in it. `index.html`'s live-SSE device table is a genuinely distinct
+  capability from any `/screens` page (it auto-refreshes on every
+  registry change with zero page interaction; the `/screens` pages load
+  a snapshot per navigation, live-updating only where a page's own
+  `` ```datatable `` config sets `"live": true`, as the Log screen does)
+  — moved to `/table` rather than removed, and cross-linked from both
+  `screens.html` (`#top-links`) and `index.html`'s own nav, so it's
+  relocated, not orphaned.
 - **Dirigera via plain `node:https`, no client library** — a polling loop,
   not an event stream: no documented real-time push mechanism, so
   `src/adapters/dirigera-adapter.js` calls `GET /v1/devices` on an interval (default
@@ -494,6 +509,39 @@ it**: the CDN URL was temporarily pointed at an unreachable host
 still rendered fully and immediately while only the content area
 correctly hung on "Loading..." — then reverted, and normal operation
 (real page content, live Log updates) re-confirmed working.
+
+**That CDN fix was real and worth keeping, but it wasn't what the user
+was actually hitting — a second report ("i still see no sidebar?") after
+that fix was already merged made the real cause specific: the user was
+navigating to the plain `http://localhost:8420/` root, which had always
+served `index.html`, a page that never had a sidebar at all.** Not a
+bug in the sidebar's own code — the sidebar was never on that page to
+begin with. Fixed at the routing layer, not the client: `GET /` now
+`302`s to `/screens`, making the screens app the actual default landing
+experience, with the old page relocated to `/table` rather than
+removed (see "Library choices" above).
+
+**A third round of the same thread refined this further, and it's worth
+recording as its own real finding, not folded silently into the fix
+above: landing on `/screens/resolved` was itself the wrong default,
+even though the sidebar was now genuinely visible.** The user's own
+words — "you use[d] screens/resolved not base index.htm[l]" — named the
+actual complaint precisely: auto-selecting the first `PAGES` entry
+("Resolved Names") as the bare-`/screens` default conflated "the default
+landing page" with "the first regular page," the same distinction
+Observable Framework's own `index.md` makes from every other page it
+lists. Fixed with a real `pages/index.md` (an overview page, with plain
+markdown links to the three regular pages, `/table`, and `/web-scan`) and
+a `HOME_SLUG` constant deliberately kept out of `PAGES` — bare `/screens`
+now renders that page's own content, with a new "meterkast-dns" home
+link at the top of the sidebar (styled distinctly, `#sidebar-home`) the
+only thing marked active there, rather than silently redirecting to
+`/screens/resolved`. Verified live: the URL now stays at the clean
+`/screens` (not rewritten to `/screens/resolved`), the home link and its
+`active` state render correctly, clicking into a regular page and back to
+home both work, and the browser's own Back button correctly restores the
+previous page via `popstate` — round-tripped for real, not just reasoned
+about.
 
 **The Log screen (`/screens/logs`) is verified live, not just on a
 static snapshot — including the SSE-append path, without needing a

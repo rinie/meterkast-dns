@@ -19,6 +19,15 @@ const PAGES = [
   { slug: "logs", title: "Log" },
 ];
 
+// pages/index.md is bare /screens' own real content -- a genuine home
+// page (overview + links), not just an alias for whichever page happens
+// to be first in PAGES. Deliberately not a PAGES entry itself: real user
+// feedback ("you use[d] screens/resolved not base index.htm[l]") was
+// that auto-selecting the first sidebar item as the default conflated
+// "default landing page" with "first regular page," the way Observable
+// Framework's own index.md is distinct from every other page it lists.
+const HOME_SLUG = "index";
+
 // markdown-it (a CDN import) is loaded lazily, on first actual use, not as
 // a static top-level import -- a real bug found by testing: a module's
 // static imports must ALL resolve before ANY of its top-level code runs,
@@ -132,6 +141,18 @@ async function mountDataTables(contentEl) {
 function renderSidebar(activeSlug) {
   const nav = document.getElementById("sidebar");
   nav.innerHTML = "";
+
+  const home = document.createElement("a");
+  home.href = "/screens";
+  home.id = "sidebar-home";
+  home.textContent = "meterkast-dns";
+  home.className = "sidebar-entry" + (activeSlug === HOME_SLUG ? " active" : "");
+  home.addEventListener("click", (event) => {
+    event.preventDefault();
+    navigateTo(HOME_SLUG, true);
+  });
+  nav.append(home);
+
   for (const page of PAGES) {
     const a = document.createElement("a");
     a.href = `/screens/${page.slug}`;
@@ -159,24 +180,36 @@ async function loadPage(slug) {
   await mountDataTables(contentEl);
 }
 
+// Bare /screens (or /, which the server 302s to /screens) resolves to
+// HOME_SLUG -- pages/index.md's own content, not a redirect to whichever
+// page is first in PAGES.
 function slugFromLocation() {
   const match = location.pathname.match(/^\/screens\/([^/]+)/);
   const slug = match?.[1];
-  return PAGES.some((p) => p.slug === slug) ? slug : PAGES[0].slug;
+  return PAGES.some((p) => p.slug === slug) ? slug : HOME_SLUG;
+}
+
+function urlForSlug(slug) {
+  return slug === HOME_SLUG ? "/screens" : `/screens/${slug}`;
 }
 
 function navigateTo(slug, push) {
-  if (push) history.pushState({ slug }, "", `/screens/${slug}`);
+  if (push) history.pushState({ slug }, "", urlForSlug(slug));
   renderSidebar(slug);
   loadPage(slug);
 }
 
-// Normalizes the URL on first load (bare /screens -> /screens/resolved)
-// via replaceState rather than pushState, so a bare landing doesn't
-// leave an extra, un-bookmarkable entry ahead of the real one in
+// Normalizes the URL on first load (e.g. a stale/unknown slug ->
+// /screens) via replaceState rather than pushState, so a bare landing
+// doesn't leave an extra, un-bookmarkable entry ahead of the real one in
 // history -- same reasoning as public/index.html's own history handling.
+// A no-op when the path is already canonical (the common case: bare
+// /screens, or a real deep link like /screens/logs).
 const initialSlug = slugFromLocation();
-history.replaceState({ slug: initialSlug }, "", `/screens/${initialSlug}`);
+const initialUrl = urlForSlug(initialSlug);
+if (location.pathname !== initialUrl) {
+  history.replaceState({ slug: initialSlug }, "", initialUrl);
+}
 renderSidebar(initialSlug);
 loadPage(initialSlug);
 
