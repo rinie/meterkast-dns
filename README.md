@@ -902,14 +902,33 @@ real LAN have no PTR record at all; that's the expected, normal outcome
 for most of a scan, not an error (same `ENOTFOUND`/`ENODATA` treatment
 `resolveDnsHostname` already gives those two codes).
 
+Bluetooth is the odd one out: Web Bluetooth has no server-side inventory
+to scan at all — its whole security model is a real user gesture picking
+one specific device from the browser's own chooser, not something a
+background process can enumerate on someone's behalf. So BLE discovery
+lives entirely client-side, in `web-scan.html` (not `/screens/discover`,
+which is backed by real server-side scans): a "Scan for a device" button
+calling `navigator.bluetooth.requestDevice({acceptAllDevices: true})` —
+the standards-track, no-flag API — one real device per click, accumulated
+across multiple clicks in that page's own memory (deduplicated by
+address), each with the same "Add to playlist" inline-input flow the
+other three transports use. `POST /playlist/devices` needed no changes at
+all to support this — it was already fully transport-agnostic. Web
+Bluetooth also never exposes a device's real MAC to page JS — `device.id`
+is an opaque, origin-scoped identifier instead, stable for one browser
+profile but not the same real Gutenberg address the native `noble`
+adapter's own MAC is; worth stating plainly since this is the *sole*
+identifier a freshly-discovered BLE playlist entry gets.
+
 mDNS discovery (browsing for arbitrary LAN devices advertising over
-Bonjour, rather than resolving an already-configured hostname) is
-deliberately not built here — parked on this project's own development
-machine specifically, since its Windows Firewall only allows mDNS for
-`svchost.exe`, not `node.exe`, so there's no way to real-verify a browse
-pass the way every other piece of this project has been verified before
-shipping. Can be added the same way once warranted (or once verified from
-a different host), without changing anything documented here.
+Bonjour, rather than resolving an already-configured hostname) is the one
+piece deliberately not built here — parked on this project's own
+development machine specifically, since its Windows Firewall only allows
+mDNS for `svchost.exe`, not `node.exe`, so there's no way to real-verify a
+browse pass the way every other piece of this project has been verified
+before shipping. Can be added the same way once warranted (or once
+verified from a different host), without changing anything documented
+here.
 
 ### Honest limits
 

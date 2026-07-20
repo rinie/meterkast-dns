@@ -941,6 +941,45 @@ own result for that hostname exactly, confirming the same
 discover-claim-restart-poll chain Dirigera/Smartbridge already proved
 also holds for the DNS transport.
 
+**Final piece of the discovery feature: "scan for unknown bluetooth
+devices."** Unlike the other three transports, Web Bluetooth has no
+server-side inventory to fetch at all — its whole security model is a
+real user gesture picking one specific device from the browser's own
+chooser, not something a background scan can enumerate. `web-scan.html`
+gets a new section calling
+`navigator.bluetooth.requestDevice({acceptAllDevices: true})` (the
+standards-track, no-flag API — the alternative, `requestLEScan()`, is
+non-standard and gated behind an experimental Chrome flag) — one real
+device per click, accumulated client-side across multiple clicks in a
+`discovered` array (deduplicated by address), with the same "Add to
+playlist" inline-input flow `/screens/discover` already established,
+duplicated rather than imported since this page has always been fully
+self-contained (its own stylesheet comment already says so). No backend
+changes were needed at all — `POST /playlist/devices` is already fully
+transport-agnostic. Documented a real, structural limit while writing
+this: Web Bluetooth deliberately never exposes a device's true BD_ADDR to
+page JS — `device.id` is an opaque, origin-scoped identifier instead,
+stable for this browser profile but not a real Gutenberg MAC the way the
+native `noble` adapter's own address is (this project already treated
+`device.id` as the playlist address for *reading* an already-configured
+device; this is the first place it becomes the *sole* identifier for a
+brand-new entry).
+
+Verified live in the browser (the same "browser-tested rendering, no real
+hardware behind it" bar already accepted for this file's pre-existing
+BLE/USB/HID Connect buttons): the new section renders with no console
+errors alongside the existing grids; clicking "Scan for a device" really
+does invoke `requestDevice({acceptAllDevices: true})` — confirmed by its
+outcome, not just by reading the code — and since this environment has no
+real Bluetooth adapter, Chrome threw a real `NotFoundError` (no
+device/adapter available), handled cleanly as "cancelled" with no crash
+and no hang. That last part mattered specifically because of the earlier
+`window.prompt()` bug in `/screens/discover` (a blocking dialog that
+genuinely hung this project's own browser-automation tooling) — this
+button was clicked with that exact failure mode in mind, and it did not
+repeat: the click returned control immediately, no `computer` timeout,
+no forced-navigate recovery needed.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
