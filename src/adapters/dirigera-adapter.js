@@ -4,6 +4,7 @@
 // a real bearer token; see IMPLEMENTATION.md for what was actually run.
 import https from "node:https";
 import { resolveSecretEnv } from "../core/secrets.js";
+import { log } from "../core/log.js";
 
 export function parseDirigeraResponse(statusCode, body) {
   if (statusCode !== 200) {
@@ -76,7 +77,16 @@ export function matchConfiguredDevices(dirigeraDevices, configuredRecords) {
 // hostname, bearer token) lives in .env, not the playlist -- see
 // README.md "Secrets never go in the playlist"; hostname isn't a secret
 // but is real-instance-specific config that shouldn't be hardcoded either.
-export default async function* dirigeraAdapter(records, { intervalMs = 30000 } = {}) {
+//
+// A cycle's fetch is caught and logged rather than left to escape the
+// generator -- a real bug found in production, not in testing: a
+// transient network error (ECONNRESET) on this single bulk call used to
+// kill the whole adapter permanently (bin/meterkastd.js's own
+// runPollingAdapter(...).catch() only logs once, it never restarts the
+// loop), unlike Ecowitt/mDNS/DNS, which already caught per-device
+// failures inside their own loops from the start. One bad cycle now just
+// waits for the next one, the same resilience those adapters already had.
+export default async function* dirigeraAdapter(records, { intervalMs = 30000, fetchDevices = fetchDirigeraDevices } = {}) {
   const hostname = process.env.DIRIGERA_HOSTNAME;
   if (!hostname) {
     throw new Error("DIRIGERA_HOSTNAME is not set");
@@ -84,9 +94,13 @@ export default async function* dirigeraAdapter(records, { intervalMs = 30000 } =
   const bearerToken = resolveSecretEnv("DIRIGERA_BEARER_TOKEN");
 
   while (true) {
-    const devices = await fetchDirigeraDevices(hostname, bearerToken);
-    for (const match of matchConfiguredDevices(devices, records)) {
-      yield match;
+    try {
+      const devices = await fetchDevices(hostname, bearerToken);
+      for (const match of matchConfiguredDevices(devices, records)) {
+        yield match;
+      }
+    } catch (error) {
+      log("warn", `Dirigera poll failed: ${error.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }

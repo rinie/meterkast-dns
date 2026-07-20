@@ -686,6 +686,41 @@ three: misconfigured with no credentials set, each adapter logs a clear
 `<Name> adapter stopped: Missing required environment variable: ...` and
 the daemon keeps serving every other device normally.
 
+**A real production incident (not a test) found a real gap in that
+isolation story: Dirigera and Smartbridge didn't retry after a transient
+network error — they died permanently, the same way a genuine
+misconfiguration does, which they aren't the same kind of failure at
+all.** `bin/meterkastd.js`'s `runPollingAdapter(...).catch()` only logs
+once; it never restarts a dead generator. A missing credential is a
+permanent condition — dying once and logging clearly is the right
+behavior, retrying forever would never succeed. A transient network
+blip (`ECONNRESET`, a dropped connection, a momentary DNS hiccup) is the
+opposite: the condition is very likely to clear up on its own by the
+next poll cycle. Ecowitt, mDNS, and DNS already drew this distinction
+correctly from the start — each catches a single device's fetch/resolve
+failure *inside* its own polling loop and moves on, so a bad cycle costs
+nothing but that one cycle. Dirigera and Smartbridge didn't, because
+each does one bulk fetch per cycle with no `try`/`catch` around it at
+all — confirmed the hard way: a real `Smartbridge adapter stopped: read
+ECONNRESET` in this project's own log, from a genuine transient failure
+against the real `trustsmartcloud2.com` API, permanently killed that
+adapter until the next full daemon restart. Fixed by wrapping each
+adapter's own bulk fetch in the identical `try`/`catch`-log-continue
+pattern the other three already used — both `fetchDevices` calls are
+now injectable (`{ fetchDevices = fetchDirigeraDevices }` /
+`{ fetchDevices = fetchSmartbridgeDevices }`, the same
+dependency-injection shape the DNS adapter's own `resolver` option
+already established), specifically so the retry behavior itself is
+directly, deterministically testable: `dirigeraAdapter`/
+`smartbridgeAdapter`'s own default export is exercised with a fake
+`fetchDevices` that throws once (a real `{code: "ECONNRESET"}` shape)
+then succeeds, asserting the generator survives the failed cycle and
+yields correctly on the next one — not just testing the pure
+`parse*`/`match*`/`fetch*` functions in isolation the way every other
+adapter test in this project does, since this specific fix lives in the
+polling loop itself. Re-verified against the real live daemon afterward:
+both adapters still return real, live data with no regression.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
