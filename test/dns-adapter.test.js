@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import dgram from "node:dgram";
 import dnsPromises from "node:dns/promises";
 import dnsPacket from "dns-packet";
-import { resolveDnsHostname } from "../src/adapters/dns-adapter.js";
+import { resolveDnsHostname, hostAddressesInCidr, scanSubnet, unclaimedDnsCandidates } from "../src/adapters/dns-adapter.js";
 
 // Real local unicast DNS, not a mock of the wire protocol -- a tiny UDP
 // server built on dns-packet (already installed transitively via
@@ -80,4 +80,63 @@ test("resolveDnsHostname rejects when the server has neither an A nor AAAA recor
       });
     },
   );
+});
+
+test("hostAddressesInCidr excludes the network and broadcast addresses for a /30", () => {
+  assert.deepEqual(hostAddressesInCidr("192.168.1.0/30"), ["192.168.1.1", "192.168.1.2"]);
+});
+
+test("hostAddressesInCidr returns all 254 host addresses for a /24", () => {
+  const addresses = hostAddressesInCidr("192.168.1.0/24");
+  assert.equal(addresses.length, 254);
+  assert.equal(addresses[0], "192.168.1.1");
+  assert.equal(addresses[253], "192.168.1.254");
+});
+
+test("hostAddressesInCidr rejects a malformed CIDR string", () => {
+  assert.throws(() => hostAddressesInCidr("not-a-cidr"), /Not a valid IPv4 CIDR/);
+  assert.throws(() => hostAddressesInCidr("192.168.1.0"), /Not a valid IPv4 CIDR/);
+});
+
+test("hostAddressesInCidr rejects a prefix outside /22../32 -- a typo shouldn't be able to sweep a /8", () => {
+  assert.throws(() => hostAddressesInCidr("10.0.0.0/8"), /CIDR prefix must be between \/22 and \/32/);
+  assert.throws(() => hostAddressesInCidr("192.168.1.0/21"), /CIDR prefix must be between \/22 and \/32/);
+});
+
+// Real local unicast DNS again, same pattern as resolveDnsHostname's own
+// tests above -- a genuine PTR query/response round trip, not a mocked
+// resolver.reverse(). Confirmed the exact query shape Node's own
+// resolver.reverse() sends (53.1.168.192.in-addr.arpa, type PTR) against
+// this same fake-server harness before writing this test, rather than
+// guessing at it.
+test("scanSubnet sweeps a small range, collecting only the addresses that actually answer a PTR query", async () => {
+  await withFakeDnsServer(
+    (q) => {
+      if (q?.type === "PTR" && q.name === "1.1.168.192.in-addr.arpa") {
+        return [{ name: q.name, type: "PTR", ttl: 120, data: "raspi3.home" }];
+      }
+      return []; // NODATA (real, expected) for every other address in the /30
+    },
+    async (resolver) => {
+      const results = await scanSubnet("192.168.1.0/30", { resolver, concurrency: 2 });
+      assert.deepEqual(results, [{ ip: "192.168.1.1", hostname: "raspi3.home" }]);
+    },
+  );
+});
+
+test("unclaimedDnsCandidates filters out hostnames already claimed as transport=dns entries, suggests a slugified name", () => {
+  const scanResults = [
+    { ip: "192.168.1.53", hostname: "raspi3.home" },
+    { ip: "192.168.1.77", hostname: "printer2.home" },
+  ];
+  const configuredRecords = {
+    raspi3: { transport: "dns", address: "raspi3.home" },
+    "kitchen-lamp": { transport: "dirigera", address: "dev-1" },
+  };
+
+  const candidates = unclaimedDnsCandidates(scanResults, configuredRecords);
+
+  assert.deepEqual(candidates, [
+    { transport: "dns", address: "printer2.home", suggestedName: "printer2-home", meta: { ip: "192.168.1.77" } },
+  ]);
 });

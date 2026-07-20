@@ -9,7 +9,7 @@ import dirigeraAdapter, { fetchDirigeraDevices, unclaimedDirigeraDevices } from 
 import ecowittAdapter from "../src/adapters/ecowitt-adapter.js";
 import smartbridgeAdapter, { fetchSmartbridgeDevices, unclaimedSmartbridgeDevices } from "../src/adapters/smartbridge-adapter.js";
 import mdnsAdapter from "../src/adapters/mdns-adapter.js";
-import dnsAdapter from "../src/adapters/dns-adapter.js";
+import dnsAdapter, { scanSubnet, unclaimedDnsCandidates } from "../src/adapters/dns-adapter.js";
 import { log } from "../src/core/log.js";
 
 const playlistPath =
@@ -57,10 +57,18 @@ for (const [transport, label, adapterFn] of pollingAdapters) {
 // transport-agnostic (it only knows a discovery function exists or it
 // doesn't), the actual hub hostname/bearer token/cloud credentials are
 // resolved here, the same place each polling adapter above resolves them.
-// Only wired up for transports that already fetch their full inventory in
-// one bulk call, so "who's unclaimed" costs nothing extra -- mDNS/DNS
-// discovery need a different mechanism (browse/subnet-sweep) and aren't
-// part of this.
+// Dirigera/Smartbridge are wired up because they already fetch their full
+// inventory in one bulk call, so "who's unclaimed" costs nothing extra.
+// DNS is wired up too, but needs a `cidr` query param -- unlike a hub's
+// own inventory call, there's no sane server-side default for "which
+// subnet", so a missing one throws a clear message (surfaced as a 502 by
+// handleDiscover, the same as any other discovery failure -- a missing
+// param and a real network/credential error both mean "this scan didn't
+// happen", no finer distinction needed on the wire). mDNS
+// discovery (browsing for arbitrary LAN devices, not resolving an
+// already-configured hostname) needs a different mechanism again
+// (DNS-SD's own meta-query) and is parked -- see README.md "Discovering
+// unclaimed devices".
 const discover = {
   dirigera: async () => {
     const hostname = process.env.DIRIGERA_HOSTNAME;
@@ -75,6 +83,12 @@ const discover = {
     const passwordHash = resolveSecretEnv("SMARTBRIDGE_PASSWORD_HASH");
     const devices = await fetchSmartbridgeDevices({ hostname: "trustsmartcloud2.com", email, mac, passwordHash });
     return unclaimedSmartbridgeDevices(devices, recordsAsObject(registry));
+  },
+  dns: async (query) => {
+    const cidr = query.get("cidr");
+    if (!cidr) throw new Error('DNS discovery needs a "cidr" query param, e.g. ?cidr=192.168.1.0/24');
+    const scanResults = await scanSubnet(cidr);
+    return unclaimedDnsCandidates(scanResults, recordsAsObject(registry));
   },
 };
 

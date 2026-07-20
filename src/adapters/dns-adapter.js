@@ -30,6 +30,103 @@ export async function resolveDnsHostname(hostname, { resolver = defaultDns } = {
   return { resolvedAddress: addresses[0], family: "AAAA" };
 }
 
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function ipToInt(ip) {
+  return (
+    ip
+      .split(".")
+      .reduce((acc, octet) => (acc << 8) + Number(octet), 0) >>> 0
+  );
+}
+
+function intToIp(int) {
+  return [24, 16, 8, 0].map((shift) => (int >>> shift) & 0xff).join(".");
+}
+
+// Every host address in an IPv4 CIDR range -- plain arithmetic, no new
+// npm package just to walk a subnet (a /24 is only 254 addresses). The
+// network and broadcast addresses are excluded for anything smaller than
+// a /31, since neither is ever a valid host on a real LAN. Bounded to
+// /22..../32 (at most 1024 addresses) deliberately -- this is meant for
+// "your own local subnet", not an accidental typo turning into a sweep of
+// a /8; the cap exists to stop a mistake from hammering a real router's
+// DNS server with thousands of lookups, not because anything larger is
+// unsafe in principle.
+export function hostAddressesInCidr(cidr) {
+  const match = cidr.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/);
+  if (!match) throw new Error(`Not a valid IPv4 CIDR: "${cidr}"`);
+  const [, base, prefixStr] = match;
+  const prefix = Number(prefixStr);
+  if (prefix < 22 || prefix > 32) {
+    throw new Error(`CIDR prefix must be between /22 and /32 (at most 1024 addresses) -- got /${prefix}`);
+  }
+  const hostBits = 32 - prefix;
+  const size = 2 ** hostBits;
+  const networkInt = hostBits === 0 ? ipToInt(base) : (ipToInt(base) & ((0xffffffff << hostBits) >>> 0)) >>> 0;
+  const skipNetworkAndBroadcast = hostBits >= 2;
+  const start = skipNetworkAndBroadcast ? 1 : 0;
+  const end = skipNetworkAndBroadcast ? size - 1 : size;
+  const addresses = [];
+  for (let i = start; i < end; i += 1) addresses.push(intToIp(networkInt + i));
+  return addresses;
+}
+
+// A reverse-PTR sweep of a subnet -- the only discovery mechanism plain
+// DNS actually has (unlike mDNS's service-browse), and a real, if small,
+// network scan: every address gets its own PTR query, run with bounded
+// concurrency rather than all at once. A `ENOTFOUND`/`ENODATA` result
+// (the overwhelming majority of addresses on a real LAN -- most IPs have
+// no PTR record at all) is the expected, normal outcome, not an error;
+// same treatment resolveDnsHostname already gives those two codes.
+export async function scanSubnet(cidr, { resolver = defaultDns, concurrency = 8 } = {}) {
+  const addresses = hostAddressesInCidr(cidr);
+  const results = [];
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < addresses.length) {
+      const ip = addresses[nextIndex];
+      nextIndex += 1;
+      try {
+        const hostnames = await resolver.reverse(ip);
+        if (hostnames.length > 0) results.push({ ip, hostname: hostnames[0] });
+      } catch (error) {
+        if (error.code !== "ENOTFOUND" && error.code !== "ENODATA") throw error;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, addresses.length) }, worker));
+  return results;
+}
+
+// The inverse of the targeted-resolution path: every scanSubnet hit whose
+// hostname isn't already claimed by a `transport: "dns"` playlist entry
+// (matched by hostname, the same value that entry's own `address` holds --
+// see resolveDnsHostname/dnsAdapter above). `suggestedName` is a slugified
+// version of the hostname itself (raspi3.home -> raspi3-home) -- only ever
+// a starting point, same as every other transport's unclaimed-candidate
+// function.
+export function unclaimedDnsCandidates(scanResults, configuredRecords) {
+  const claimedHostnames = new Set(
+    Object.values(configuredRecords)
+      .filter((record) => record.transport === "dns")
+      .map((record) => record.address),
+  );
+  return scanResults
+    .filter(({ hostname }) => !claimedHostnames.has(hostname))
+    .map(({ ip, hostname }) => ({
+      transport: "dns",
+      address: hostname,
+      suggestedName: slugify(hostname),
+      meta: { ip },
+    }));
+}
+
 // Polls every transport = "dns" playlist entry on an interval, same shape
 // as every other polling adapter. `address` stays the human-configured
 // hostname (raspi3.home) -- the lookup key, not the answer -- while the

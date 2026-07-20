@@ -917,6 +917,30 @@ confirming the whole chain (discover → claim → restart → poll → curate)
 works end to end for a device that was never in the playlist at any
 earlier point in this project's history.
 
+**Follow-up: DNS subnet-sweep discovery** (`scanSubnet`/`unclaimedDnsCandidates`
+in `dns-adapter.js`, `POST /discover/dns?cidr=...`, a CIDR input on
+`/screens/discover`'s DNS panel). `hostAddressesInCidr` is a small,
+dependency-free IPv4 CIDR walker (no new npm package for a /24's 254
+addresses), capped to `/22`..`/32` so a typo can't turn into an
+accidental sweep of a much larger range. Verified live against this
+machine's own real LAN: `POST /discover/dns?cidr=192.168.1.0/24`
+completed in **0.192 seconds** (most of a /24 has no PTR record at all,
+and the router answers those quickly, not by timing out) and returned 34
+real device hostnames actually present on the network — a Fritzbox
+(`fritz.home`), an LG webOS TV, two Samsung phones, a Bosch dishwasher,
+several ESP-based smart-home nodes, this project's own dev machines, and
+more. `raspi3.home` (already claimed) correctly did not appear.
+`living-room-tv` (the LG TV) was claimed — once via a raw `curl` call
+against `POST /playlist/devices`, confirmed via the actual
+`/screens/discover` browser UI too (typed the CIDR into the new input,
+clicked Scan, got 33 results — one fewer than the raw 34, correctly
+excluding the now-claimed TV). After restarting the daemon,
+`GET /devices/living-room-tv` returned real live data —
+`{"resolvedAddress":"192.168.1.97","family":"A"}` — matching the scan's
+own result for that hostname exactly, confirming the same
+discover-claim-restart-poll chain Dirigera/Smartbridge already proved
+also holds for the DNS transport.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
