@@ -1,0 +1,32 @@
+# Curated flat display fields for Ecowitt -- a few lines mirroring the
+# indoor unit's own main screen (Indoor/Outdoor Temperature/Humidity), not
+# every field the API happens to return. Committed, not gitignored: unlike
+# device-playlist.toml (real network topology), this only names paths into
+# Ecowitt's own known response shape -- nothing personal, and a sensible
+# default for anyone with the same integration. See README.md "Flattening
+# nested readings for display".
+#
+# Ecowitt's API always answers the same shape regardless of device, so
+# this file is a flat `fields` array -- no deviceType split needed (see
+# dirigera.toml for a transport that does need one). valuePath/unitPath
+# are dot-paths into a device's own `meta` object; unitPath is optional --
+# omit it for a field whose value needs no unit suffix.
+[[fields]]
+label     = "Indoor Temperature"
+valuePath = "indoor.temperature.value"
+unitPath  = "indoor.temperature.unit"
+
+[[fields]]
+label     = "Indoor Humidity"
+valuePath = "indoor.humidity.value"
+unitPath  = "indoor.humidity.unit"
+
+[[fields]]
+label     = "Outdoor Temperature"
+valuePath = "outdoor.temperature.value"
+unitPath  = "outdoor.temperature.unit"
+
+[[fields]]
+label     = "Outdoor Humidity"
+valuePath = "outdoor.humidity.value"
+unitPath  = "outdoor.humidity.unit"

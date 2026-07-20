@@ -40,6 +40,24 @@ test("matchConfiguredDevices matches dirigera-transport records by device id, su
   ]);
 });
 
+// Real bug, caught in live verification (not a test): an extra hand-typed
+// playlist field this adapter doesn't itself manage (displayFields, the
+// per-device display-filter allow-list) was silently dropped because
+// matchConfiguredDevices built its match object field-by-field instead of
+// spreading ...record first, unlike the mdns/dns adapters.
+test("matchConfiguredDevices carries forward extra playlist fields it doesn't itself manage", () => {
+  const dirigeraDevices = [{ id: "dev-1", deviceType: "light", attributes: { isOn: true } }];
+  const configuredRecords = {
+    "kitchen-lamp": { transport: "dirigera", address: "dev-1", displayFields: ["On"] },
+  };
+
+  const matches = matchConfiguredDevices(dirigeraDevices, configuredRecords);
+
+  assert.deepEqual(matches, [
+    { name: "kitchen-lamp", transport: "dirigera", address: "dev-1", deviceType: "light", displayFields: ["On"], meta: { isOn: true } },
+  ]);
+});
+
 test("matchConfiguredDevices ignores configured devices Dirigera didn't return", () => {
   const matches = matchConfiguredDevices([], {
     "kitchen-lamp": { transport: "dirigera", address: "dev-1" },

@@ -109,20 +109,9 @@ function populateFormFromRow(formEl, row) {
   }
 }
 
-// A row's `display` -- a few curated, pre-formatted lines from
-// display-fields.toml (see src/core/display-fields.js), e.g. "Indoor
-// Temperature: 23,5 ℃" -- rendered as plain text lines into a page's own
-// <div id="display-fields">, not through observable-forms' :::form
-// grammar: unlike a form's fixed field set, which lines exist varies by
-// transport (an Ecowitt device gets four, a Dirigera one gets none today),
-// which doesn't fit a static field list. A transport with no mapping
-// configured, or a row with no `display` array at all, just clears the
-// container -- not every device has curated lines to show.
-function populateDisplayFields(contentEl, row) {
-  const container = contentEl.querySelector("#display-fields");
-  if (!container) return;
+function renderDisplayLines(container, lines) {
   container.innerHTML = "";
-  for (const { label, display } of row?.display ?? []) {
+  for (const { label, display } of lines) {
     const line = document.createElement("div");
     line.className = "display-field-line";
     const strong = document.createElement("strong");
@@ -130,6 +119,36 @@ function populateDisplayFields(contentEl, row) {
     line.append(strong, ` ${display}`);
     container.append(line);
   }
+}
+
+// A row's `display` -- a few curated, pre-formatted lines from
+// display-fields/ (see src/core/display-fields.js), e.g. "Indoor
+// Temperature: 23,5 ℃" -- rendered as plain text lines into a page's own
+// <div id="display-fields">, not through observable-forms' :::form
+// grammar: unlike a form's fixed field set, which lines exist varies by
+// transport (an Ecowitt device gets four, a Dirigera one gets none today),
+// which doesn't fit a static field list. A transport with no mapping
+// configured, or a row with no `display` array at all, just clears the
+// container -- not every device has curated lines to show.
+//
+// `displayHidden` is the same shape, for lines a device's own
+// displayFields/excludeDisplayFields playlist filter left out -- real,
+// already-formatted values, just set aside (see server.js's withDisplay).
+// Rendered into a collapsed <details id="display-fields-hidden-details">
+// if the page provides one, so a filtered-out field's live value stays
+// checkable (click to expand) without permanently re-enabling it in the
+// primary list. A page without that element (or a device with nothing
+// hidden) just skips it -- same graceful-degradation as the primary panel.
+function populateDisplayFields(contentEl, row) {
+  const container = contentEl.querySelector("#display-fields");
+  if (container) renderDisplayLines(container, row?.display ?? []);
+
+  const hiddenDetails = contentEl.querySelector("#display-fields-hidden-details");
+  const hiddenContainer = contentEl.querySelector("#display-fields-hidden");
+  if (!hiddenDetails || !hiddenContainer) return;
+  const hiddenLines = row?.displayHidden ?? [];
+  hiddenDetails.hidden = hiddenLines.length === 0;
+  renderDisplayLines(hiddenContainer, hiddenLines);
 }
 
 // One live EventSource per page load (not per grid -- a page only

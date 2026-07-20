@@ -2,9 +2,12 @@
 
 Every entry in the local playlist, resolved or not -- the same data
 `GET /devices` returns. Select a row to see its full detail below: a few
-curated readings first (see `display-fields.toml`, a few lines mirroring
+curated readings first (see `display-fields/`, a few lines mirroring
 a device's own physical console, where a transport has one configured),
-then the raw `meta` a live adapter reading carries in full.
+optionally narrowed further per device
+(`displayFields`/`excludeDisplayFields` in `device-playlist.toml`) --
+anything narrowed out stays checkable under "Hidden fields" below, not
+gone -- then the raw `meta` a live adapter reading carries in full.
 
 :::form
 
@@ -15,6 +18,11 @@ then the raw `meta` a live adapter reading carries in full.
 :::
 
 <div id="display-fields"></div>
+
+<details id="display-fields-hidden-details" hidden>
+<summary>Hidden fields</summary>
+<div id="display-fields-hidden"></div>
+</details>
 
 ```datatable
 {"endpoint": "/devices", "columns": ["name", "transport", "address"], "sort": "name"}

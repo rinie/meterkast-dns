@@ -244,3 +244,55 @@ test("handleGet resolves display fields by transport+deviceType for a hub like D
   handleGet(registry, displayFields, "front-door", {}, doorRes);
   assert.deepEqual(JSON.parse(doorRes.body).display, [{ label: "Open", display: "Off" }]);
 });
+
+test("handleGet narrows display down to a device's own allow-list, moving the rest into displayHidden", () => {
+  const registry = createRegistry();
+  upsertRecord(registry, "kitchen-lamp", {
+    transport: "dirigera",
+    address: "dev-1",
+    deviceType: "light",
+    displayFields: ["On"],
+    meta: { isOn: true, lightLevel: 70 },
+  });
+  const displayFields = {
+    dirigera: {
+      light: [
+        { label: "On", valuePath: "isOn", format: "boolean" },
+        { label: "Brightness", valuePath: "lightLevel", unit: "%" },
+      ],
+    },
+  };
+
+  const res = fakeResponse();
+  handleGet(registry, displayFields, "kitchen-lamp", {}, res);
+  const body = JSON.parse(res.body);
+
+  assert.deepEqual(body.display, [{ label: "On", display: "On" }]);
+  assert.deepEqual(body.displayHidden, [{ label: "Brightness", display: "70.0 %" }]);
+});
+
+test("handleGet narrows display down using a device's own deny-list", () => {
+  const registry = createRegistry();
+  upsertRecord(registry, "hallway-lamp", {
+    transport: "dirigera",
+    address: "dev-2",
+    deviceType: "light",
+    excludeDisplayFields: ["Brightness"],
+    meta: { isOn: false, lightLevel: 30 },
+  });
+  const displayFields = {
+    dirigera: {
+      light: [
+        { label: "On", valuePath: "isOn", format: "boolean" },
+        { label: "Brightness", valuePath: "lightLevel", unit: "%" },
+      ],
+    },
+  };
+
+  const res = fakeResponse();
+  handleGet(registry, displayFields, "hallway-lamp", {}, res);
+  const body = JSON.parse(res.body);
+
+  assert.deepEqual(body.display, [{ label: "On", display: "Off" }]);
+  assert.deepEqual(body.displayHidden, [{ label: "Brightness", display: "30.0 %" }]);
+});

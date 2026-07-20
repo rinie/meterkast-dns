@@ -55,6 +55,12 @@ export function fetchSmartbridgeDevices(
 // undecoded 128-bit BLE UUID or LIRC's raw pulse mode. version_status and
 // version_data still change when the device's real state changes, which is
 // enough to detect "something happened" without knowing what happened.
+//
+// Spreads `...record` first, same as the mdns/dns adapters (and now
+// dirigera-adapter.js, fixed for the identical reason) -- without it, any
+// extra hand-typed playlist field this adapter doesn't itself manage
+// (like displayFields/excludeDisplayFields, see server.js's withDisplay)
+// was silently dropped instead of carried through.
 export function matchConfiguredDevices(smartbridgeDevices, configuredRecords) {
   const byId = new Map(smartbridgeDevices.map((device) => [device.id, device]));
   const matches = [];
@@ -63,6 +69,7 @@ export function matchConfiguredDevices(smartbridgeDevices, configuredRecords) {
     const device = byId.get(record.address);
     if (!device) continue;
     matches.push({
+      ...record,
       name,
       transport: "smartbridge",
       address: record.address,

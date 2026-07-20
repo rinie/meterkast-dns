@@ -55,10 +55,16 @@ export function fetchDirigeraDevices(hostname, bearerToken, port = 8443) {
 // instead of raw Zigbee/Matter in the first place. `deviceType` (light,
 // outlet, motionSensor, ...) is surfaced as its own peer field, not
 // folded into meta -- it's Dirigera's own structural classification of
-// the device, used to look up which display-fields.toml entry applies
+// the device, used to look up which display-fields/ entry applies
 // (see display-fields.js's resolveFieldDefs), the same way LIRC keys a
 // remote's button mapping by remote model rather than by which physical
 // remote you happen to own.
+//
+// Spreads `...record` first, same as the mdns/dns adapters -- a real bug,
+// caught in live verification, not a test: without it, any extra
+// hand-typed playlist field this adapter doesn't itself manage (like
+// displayFields/excludeDisplayFields, see server.js's withDisplay) was
+// silently dropped instead of carried through.
 export function matchConfiguredDevices(dirigeraDevices, configuredRecords) {
   const byId = new Map(dirigeraDevices.map((device) => [device.id, device]));
   const matches = [];
@@ -67,6 +73,7 @@ export function matchConfiguredDevices(dirigeraDevices, configuredRecords) {
     const device = byId.get(record.address);
     if (!device) continue;
     matches.push({
+      ...record,
       name,
       transport: "dirigera",
       address: record.address,

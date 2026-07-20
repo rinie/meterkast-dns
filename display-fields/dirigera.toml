@@ -1,0 +1,81 @@
+# Dirigera fans one hub out to structurally different device types -- a
+# light's isOn/lightLevel means nothing for a door sensor's isOpen -- so
+# this file is a table keyed by deviceType instead of a flat `fields`
+# array (see ecowitt.toml for a transport that doesn't need the split).
+# deviceType is the API's own structural classification
+# (matchConfiguredDevices in dirigera-adapter.js surfaces it verbatim as
+# device.deviceType), not a device name -- keyed by device *model*, the
+# same way LIRC's remote-mapping .conf files are keyed by remote model
+# rather than by which specific physical remote a user owns, so this stays
+# a generic, shareable mapping like ecowitt.toml, not something tied to
+# any one person's specific kitchen light.
+#
+# Every field below is verified against a real Dirigera hub's real
+# attributes (see IMPLEMENTATION.md), not guessed from API docs. Dirigera
+# has other deviceTypes too (gateway, repeater, lightController,
+# lightSensor, ...); add entries for those the same way once their real
+# attributes are confirmed -- these six cover the common actuator/sensor
+# cases first.
+[[light]]
+label     = "On"
+valuePath = "isOn"
+format    = "boolean"
+
+[[light]]
+label     = "Brightness"
+valuePath = "lightLevel"
+unit      = "%"
+
+[[outlet]]
+label     = "On"
+valuePath = "isOn"
+format    = "boolean"
+
+[[motionSensor]]
+label     = "Detected"
+valuePath = "isDetected"
+format    = "boolean"
+
+[[motionSensor]]
+label     = "Battery"
+valuePath = "batteryPercentage"
+unit      = "%"
+
+[[openCloseSensor]]
+label     = "Open"
+valuePath = "isOpen"
+format    = "boolean"
+
+[[openCloseSensor]]
+label     = "Battery"
+valuePath = "batteryPercentage"
+unit      = "%"
+
+[[waterSensor]]
+label     = "Leak Detected"
+valuePath = "waterLeakDetected"
+format    = "boolean"
+
+[[waterSensor]]
+label     = "Battery"
+valuePath = "batteryPercentage"
+unit      = "%"
+
+[[environmentSensor]]
+label     = "Temperature"
+valuePath = "currentTemperature"
+unit      = "°C"
+
+[[environmentSensor]]
+label     = "Humidity"
+valuePath = "currentRH"
+unit      = "%"
+
+[[environmentSensor]]
+label     = "PM2.5"
+valuePath = "currentPM25"
+unit      = "µg/m³"
+
+[[environmentSensor]]
+label     = "VOC Index"
+valuePath = "vocIndex"

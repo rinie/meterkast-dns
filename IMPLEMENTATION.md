@@ -40,7 +40,7 @@ src/
     run-polling-adapter.js    # shared wiring: check transport, run, upsert
     offsite.js                 # git-backed offsite sync: init, commit, push, orchestrate
     log.js                      # bounded timestamped log buffer + subscribe -- see README.md
-    display-fields.js            # dot-path resolve + comma-decimal format, driven by display-fields.toml
+    display-fields.js            # dot-path resolve + comma-decimal format, driven by display-fields/
     server.js                   # createServer + every route handler + static-page serving
   adapters/
     load-adapters.js            # dynamic import() loader
@@ -96,7 +96,9 @@ public/
       README.md                  # provenance: exact upstream commit vendored
 device-playlist.example.toml     # fixture/template, committed
 device-playlist.toml             # the real Use-editable data file, gitignored
-display-fields.toml              # curated per-transport display lines -- committed, see README.md
+display-fields/                  # curated display lines, one TOML file per transport -- committed, see README.md
+  ecowitt.toml
+  dirigera.toml
 backups/                         # dated snapshots, written automatically, gitignored
                                   # -- itself its own git repo, pushed offsite
 .env                             # real secret values, gitignored, never committed
@@ -192,8 +194,8 @@ backups/                         # dated snapshots, written automatically, gitig
   confirmed identical in substance (only comment wording differed) before
   trusting it.
 - **`display-fields.js` needs no dependency either** — `smol-toml` (the
-  project's only real dependency) already parses `display-fields.toml`'s
-  array-of-tables syntax with no code changes; the dot-path resolver and
+  project's only real dependency) already parses each `display-fields/*.toml`
+  file's array-of-tables syntax with no code changes; the dot-path resolver and
   comma-decimal formatter are both a handful of lines with no library
   behind them.
 - **WebBLE/WebUSB/WebHID — the only BLE/USB/HID path now** — `handleReport`
@@ -772,6 +774,61 @@ selecting `kitchen-lamp` on `/screens/devices` renders `On: Off` /
 (Ecowitt, the pre-existing flat-array path) continues to render its four
 lines unchanged alongside it — both lookup shapes verified live, side by
 side, not just in isolation.
+
+**A follow-up ("should the display-fields.toml be per adapter/protocol?")
+split the single `display-fields.toml` into `display-fields/`, one TOML
+file per transport** — the same friction already resolved once at the
+personal/generic boundary (`device-playlist.toml` vs. `display-fields.toml`)
+was starting to reappear one layer down as more transports accumulated in
+one shared file. `ecowitt.toml`/`dirigera.toml` drop the
+`displayFields.<transport>.` prefix the single-file shape needed (the
+filename supplies it now); `loadDisplayFields` changed from a single
+`readFile`+`parse` to reading every `*.toml` in a directory, using a
+top-level `fields` array as the flat/nested signal per file.
+`resolveFieldDefs`/`flattenDisplayFields` needed no changes at all — both
+already operated on the post-merge in-memory shape, not the file layout.
+Re-verified live end to end after the restructure: `GET
+/devices/kitchen-lamp` and `GET /devices/weather-station` both returned
+identical `display` output to before the split, confirming the directory
+merge reproduces the exact same in-memory shape the single file used to
+produce.
+
+**The same conversation then asked for per-device narrowing of
+`display-fields/`'s catalog** — an allow-list or deny-list, chosen per
+device, plus a way to check a narrowed-out field's live value without
+permanently re-enabling it. `partitionDisplayLines` (new, in
+`display-fields.js`) splits `flattenDisplayFields`'s already-computed
+lines into `shown`/`hidden` by label, reading two optional playlist keys
+carried straight through on the record (`displayFields`/
+`excludeDisplayFields`); `server.js`'s `withDisplay` returns both as
+`display`/`displayHidden`.
+
+**Live verification caught a real, pre-existing bug, not introduced by
+this change but exposed by it**: setting `kitchen-lamp.displayFields =
+["On"]` in the real playlist and restarting had no effect at all —
+`display` kept showing both `On` and `Brightness`. Root cause:
+`dirigera-adapter.js`'s `matchConfiguredDevices` built its match object
+field-by-field (`{name, transport, address, deviceType, meta}`) instead
+of spreading `...record` first the way the mdns/dns adapters already did,
+so any extra hand-typed playlist field neither of those adapters manage —
+`displayFields`, `excludeDisplayFields`, or anything else added later —
+was silently dropped before it ever reached the registry.
+`smartbridge-adapter.js` had the identical gap. Both fixed by spreading
+`...record` first, matching the pattern the other adapters already
+established; regression tests added confirming an extra playlist field
+survives `matchConfiguredDevices` for both. Re-verified live after the
+fix: `GET /devices/kitchen-lamp` with `displayFields = ["On"]` set
+correctly returned `"display":[{"label":"On","display":"Off"}]` and
+`"displayHidden":[{"label":"Brightness","display":"70.0 %"}]`. Confirmed
+in the browser too: selecting `kitchen-lamp` on `/screens/devices` shows
+only `On: Off` in the primary panel, with a collapsed "Hidden fields"
+section (initially `hidden`, un-hides itself once a device actually has
+something in it) containing `Brightness: 70.0 %` — expanding it in the
+accessibility tree confirmed the value renders correctly. The temporary
+`displayFields` line used for this verification was reverted from the
+real (gitignored) `device-playlist.toml` afterward — added only to
+exercise the feature, not a permanent change to this device's real
+configuration.
 
 ## Testing
 

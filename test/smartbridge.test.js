@@ -52,6 +52,25 @@ test("matchConfiguredDevices passes encrypted data/status through unchanged, exp
   ]);
 });
 
+// Real bug, caught in live verification (not a test): an extra
+// hand-typed playlist field this adapter doesn't itself manage
+// (displayFields, the per-device display-filter allow-list) was silently
+// dropped because matchConfiguredDevices built its match object
+// field-by-field instead of spreading ...record first, unlike the
+// mdns/dns adapters (and now dirigera-adapter.js, fixed for the same
+// reason).
+test("matchConfiguredDevices carries forward extra playlist fields it doesn't itself manage", async () => {
+  const devices = await loadFixture();
+  const configuredRecords = {
+    "kaku-plug": { transport: "smartbridge", address: "222222", excludeDisplayFields: ["Battery"] },
+  };
+
+  const matches = matchConfiguredDevices(devices, configuredRecords);
+
+  assert.equal(matches.length, 1);
+  assert.deepEqual(matches[0].excludeDisplayFields, ["Battery"]);
+});
+
 test("matchConfiguredDevices ignores configured devices the sync response didn't return", () => {
   const matches = matchConfiguredDevices([], {
     "kaku-plug": { transport: "smartbridge", address: "111111" },
