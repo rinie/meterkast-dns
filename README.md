@@ -434,6 +434,17 @@ design makes is explicit: give up the always-on background daemon for
 BLE/USB specifically, in exchange for zero native dependencies, anywhere,
 for anyone.
 
+**Listed with the same DataTables grid `/screens` uses, not a plain
+button list.** `web-scan.html` reuses `public/grid.js` directly — each
+transport's playlist entries render as a grid (BLE also shows its
+`service`/`characteristic`, USB its `interfaceNumber`/`endpointNumber`),
+with a real `<button>` in an action column instead of a detail-form
+hookup. Clicking it still counts as a genuine user gesture for
+`requestDevice()` — the browser tracks the actual native click that
+triggered the JS, not which library dispatched it — so none of the
+connect/decode logic above needed to change, only how each row renders
+and how its button gets wired.
+
 ### Extending to WebUSB and WebHID (raw USB, and HID over either USB or Bluetooth)
 
 Same shape as WebBLE above -- `navigator.usb`/`navigator.hid` in the
