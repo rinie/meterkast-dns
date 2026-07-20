@@ -8,8 +8,6 @@
 // names a live JSON endpoint; the resulting grid's row selection
 // populates the ":::form" block above it, the same pattern
 // locuswms-web-frontend's app.js already uses.
-import MarkdownIt from "https://cdn.jsdelivr.net/npm/markdown-it@14/+esm";
-import markdownItForm from "/vendor/observable-forms/markdown-it-form.js";
 import { createGrid } from "/grid.js";
 
 // The sidebar/page list -- hand-maintained here, the same way Observable
@@ -21,32 +19,54 @@ const PAGES = [
   { slug: "logs", title: "Log" },
 ];
 
-const md = new MarkdownIt();
-markdownItForm(md);
+// markdown-it (a CDN import) is loaded lazily, on first actual use, not as
+// a static top-level import -- a real bug found by testing: a module's
+// static imports must ALL resolve before ANY of its top-level code runs,
+// including renderSidebar() below, which has nothing to do with markdown
+// at all. A slow or blocked CDN fetch silently left the sidebar invisible
+// with no error shown ("I do not see the sidebar on startup"). Fetched
+// once, reused for every page after that.
+let mdPromise = null;
+function getMarkdownIt() {
+  if (!mdPromise) {
+    mdPromise = (async () => {
+      const [{ default: MarkdownIt }, { default: markdownItForm }] = await Promise.all([
+        import("https://cdn.jsdelivr.net/npm/markdown-it@14/+esm"),
+        import("/vendor/observable-forms/markdown-it-form.js"),
+      ]);
+      const md = new MarkdownIt();
+      markdownItForm(md);
 
-// ```datatable fence -- the one piece of markdown syntax this app adds
-// beyond observable-forms itself. The block's content is a small JSON
-// config: {endpoint, columns?, header?, sort?, reverse?} -- columns/
-// header/sort/reverse deliberately reuse Observable's own Inputs.table
-// option names (observablehq.com/framework/inputs/table), just
-// expressed as JSON instead of JS, since a fenced block can't safely
-// eval real JS from a hand-authored file without a bigger discussion
-// about trust. Anything with another info string still renders as a
-// normal code block via the default fence renderer.
-const defaultFence = md.renderer.rules.fence.bind(md.renderer.rules);
-md.renderer.rules.fence = (tokens, idx, options, env, self) => {
-  const token = tokens[idx];
-  if (token.info.trim() === "datatable") {
-    let config;
-    try {
-      config = JSON.parse(token.content);
-    } catch (error) {
-      return `<div class="datatable-error">Invalid datatable config: ${error.message}</div>`;
-    }
-    return `<div class="datatable-grid" data-config='${JSON.stringify(config).replace(/'/g, "&#39;")}'></div>`;
+      // ```datatable fence -- the one piece of markdown syntax this app
+      // adds beyond observable-forms itself. The block's content is a
+      // small JSON config: {endpoint, columns?, header?, sort?,
+      // reverse?} -- columns/header/sort/reverse deliberately reuse
+      // Observable's own Inputs.table option names
+      // (observablehq.com/framework/inputs/table), just expressed as
+      // JSON instead of JS, since a fenced block can't safely eval real
+      // JS from a hand-authored file without a bigger discussion about
+      // trust. Anything with another info string still renders as a
+      // normal code block via the default fence renderer.
+      const defaultFence = md.renderer.rules.fence.bind(md.renderer.rules);
+      md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+        const token = tokens[idx];
+        if (token.info.trim() === "datatable") {
+          let config;
+          try {
+            config = JSON.parse(token.content);
+          } catch (error) {
+            return `<div class="datatable-error">Invalid datatable config: ${error.message}</div>`;
+          }
+          return `<div class="datatable-grid" data-config='${JSON.stringify(config).replace(/'/g, "&#39;")}'></div>`;
+        }
+        return defaultFence(tokens, idx, options, env, self);
+      };
+
+      return md;
+    })();
   }
-  return defaultFence(tokens, idx, options, env, self);
-};
+  return mdPromise;
+}
 
 // Populates a ":::form" detail block from a selected grid row --
 // matches by `[name]` (an editable field) or `[data-name]` (a readonly
@@ -129,7 +149,7 @@ async function loadPage(slug) {
   closeLiveEventSource();
   const contentEl = document.getElementById("content");
   contentEl.innerHTML = "Loading...";
-  const res = await fetch(`/pages/${slug}.md`);
+  const [res, md] = await Promise.all([fetch(`/pages/${slug}.md`), getMarkdownIt()]);
   if (!res.ok) {
     contentEl.textContent = `Page not found: ${slug}`;
     return;
