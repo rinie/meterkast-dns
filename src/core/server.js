@@ -13,16 +13,19 @@ import { join, dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listRecords, getRecord, upsertRecord, subscribe } from "./registry.js";
 import { listLogs, subscribeLogs } from "./log.js";
-import { flattenDisplayFields } from "./display-fields.js";
+import { flattenDisplayFields, resolveFieldDefs } from "./display-fields.js";
 
 // `display` adds a few curated, formatted lines (display-fields.toml,
-// keyed by transport) alongside a record's raw `meta` -- never replaces
-// it, since not every transport has a mapping defined. Absent/empty
-// `displayFields` (no display-fields.toml, or nothing configured for
-// this transport) is exactly what flattenDisplayFields already treats
-// as "no lines," so this never has to special-case that itself.
+// keyed by transport, or by transport+deviceType for a hub like Dirigera
+// that fans out to structurally different device types) alongside a
+// record's raw `meta` -- never replaces it, since not every
+// transport/deviceType has a mapping defined. Absent/empty `displayFields`
+// (no display-fields.toml, or nothing configured for this transport) is
+// exactly what flattenDisplayFields already treats as "no lines," so this
+// never has to special-case that itself.
 function withDisplay(record, displayFields) {
-  return { ...record, display: flattenDisplayFields(displayFields[record.transport], record.meta) };
+  const fieldDefs = resolveFieldDefs(displayFields, record.transport, record.deviceType);
+  return { ...record, display: flattenDisplayFields(fieldDefs, record.meta) };
 }
 
 export function handleList(registry, displayFields, req, res) {

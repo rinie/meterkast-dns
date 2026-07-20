@@ -26,22 +26,52 @@ function formatNumber(value) {
   return num.toFixed(1);
 }
 
-// fieldDefs: [{label, valuePath, unitPath?}], meta: a device's own meta
-// object. A field whose valuePath resolves to nothing (wrong path, or
-// this particular reading didn't include it) is skipped rather than
-// shown blank -- same "only show what's real" reasoning as GET /resolved
-// leaving out a never-resolved entry entirely.
+// Dirigera reports on/off state as a real boolean (isOn: true/false), not
+// a string with a unit -- "23.7 %" formatting doesn't apply, it needs its
+// own On/Off rendering instead.
+function formatBoolean(value) {
+  return value === true || value === "true" ? "On" : "Off";
+}
+
+// fieldDefs: [{label, valuePath, unitPath?, unit?, format?}], meta: a
+// device's own meta object. A field whose valuePath resolves to nothing
+// (wrong path, or this particular reading didn't include it) is skipped
+// rather than shown blank -- same "only show what's real" reasoning as
+// GET /resolved leaving out a never-resolved entry entirely.
+//
+// unitPath (a path into meta, Ecowitt-style: the unit travels alongside
+// the reading) and unit (a literal string, Dirigera-style: lightLevel is
+// always "%", there's no unit field in the API response to point at) are
+// both supported -- unitPath wins if both happen to be set.
 export function flattenDisplayFields(fieldDefs, meta) {
   if (!meta || !fieldDefs) return [];
   const lines = [];
-  for (const { label, valuePath, unitPath } of fieldDefs) {
+  for (const { label, valuePath, unitPath, unit: literalUnit, format } of fieldDefs) {
     const rawValue = getPath(meta, valuePath);
     if (rawValue === undefined) continue;
-    const unit = unitPath ? getPath(meta, unitPath) : undefined;
+    if (format === "boolean") {
+      lines.push({ label, display: formatBoolean(rawValue) });
+      continue;
+    }
+    const unit = unitPath ? getPath(meta, unitPath) : literalUnit;
     const display = unit ? `${formatNumber(rawValue)} ${unit}` : formatNumber(rawValue);
     lines.push({ label, display });
   }
   return lines;
+}
+
+// displayFields[transport] is either a flat array (Ecowitt: one uniform
+// response shape, deviceType doesn't apply) or an object keyed by
+// deviceType (Dirigera: one hub fans out to structurally different
+// device types, each with its own fields -- a light's isOn/lightLevel
+// doesn't mean anything for a door sensor's isOpen). Array wins the
+// shape check so a bare `[[displayFields.ecowitt]]` transport never has
+// to also carry a deviceType key it doesn't have.
+export function resolveFieldDefs(displayFields, transport, deviceType) {
+  const entry = displayFields?.[transport];
+  if (!entry) return undefined;
+  if (Array.isArray(entry)) return entry;
+  return entry[deviceType];
 }
 
 // Returns {transport: [{label, valuePath, unitPath?}]} -- empty object

@@ -29,3 +29,84 @@ unitPath  = "outdoor.temperature.unit"
 label     = "Outdoor Humidity"
 valuePath = "outdoor.humidity.value"
 unitPath  = "outdoor.humidity.unit"
+
+# Dirigera fans one hub out to structurally different device types --
+# a light's isOn/lightLevel means nothing for a door sensor's isOpen --
+# so displayFields.dirigera is a table keyed by deviceType instead of a
+# flat array. deviceType is the API's own structural classification
+# (matchConfiguredDevices in dirigera-adapter.js surfaces it verbatim as
+# device.deviceType), not a device name -- keyed by device *model*, the
+# same way LIRC's remote-mapping .conf files are keyed by remote model
+# rather than by which specific physical remote a user owns, so this
+# stays a generic, shareable mapping like the ecowitt entries above, not
+# something tied to any one person's specific kitchen light.
+#
+# Every field below is verified against a real Dirigera hub's real
+# attributes (see IMPLEMENTATION.md), not guessed from API docs. Dirigera
+# has other deviceTypes too (gateway, repeater, lightController,
+# lightSensor, ...); add entries for those the same way once their real
+# attributes are confirmed -- these six cover the common actuator/sensor
+# cases first.
+[[displayFields.dirigera.light]]
+label     = "On"
+valuePath = "isOn"
+format    = "boolean"
+
+[[displayFields.dirigera.light]]
+label     = "Brightness"
+valuePath = "lightLevel"
+unit      = "%"
+
+[[displayFields.dirigera.outlet]]
+label     = "On"
+valuePath = "isOn"
+format    = "boolean"
+
+[[displayFields.dirigera.motionSensor]]
+label     = "Detected"
+valuePath = "isDetected"
+format    = "boolean"
+
+[[displayFields.dirigera.motionSensor]]
+label     = "Battery"
+valuePath = "batteryPercentage"
+unit      = "%"
+
+[[displayFields.dirigera.openCloseSensor]]
+label     = "Open"
+valuePath = "isOpen"
+format    = "boolean"
+
+[[displayFields.dirigera.openCloseSensor]]
+label     = "Battery"
+valuePath = "batteryPercentage"
+unit      = "%"
+
+[[displayFields.dirigera.waterSensor]]
+label     = "Leak Detected"
+valuePath = "waterLeakDetected"
+format    = "boolean"
+
+[[displayFields.dirigera.waterSensor]]
+label     = "Battery"
+valuePath = "batteryPercentage"
+unit      = "%"
+
+[[displayFields.dirigera.environmentSensor]]
+label     = "Temperature"
+valuePath = "currentTemperature"
+unit      = "°C"
+
+[[displayFields.dirigera.environmentSensor]]
+label     = "Humidity"
+valuePath = "currentRH"
+unit      = "%"
+
+[[displayFields.dirigera.environmentSensor]]
+label     = "PM2.5"
+valuePath = "currentPM25"
+unit      = "µg/m³"
+
+[[displayFields.dirigera.environmentSensor]]
+label     = "VOC Index"
+valuePath = "vocIndex"

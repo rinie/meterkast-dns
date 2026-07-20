@@ -52,7 +52,13 @@ export function fetchDirigeraDevices(hostname, bearerToken, port = 8443) {
 // passed through as `meta` verbatim rather than cherry-picked field by
 // field -- the API already returns clean, well-named state (isOn,
 // lightLevel, batteryPercentage, ...), which is the whole reason to use it
-// instead of raw Zigbee/Matter in the first place.
+// instead of raw Zigbee/Matter in the first place. `deviceType` (light,
+// outlet, motionSensor, ...) is surfaced as its own peer field, not
+// folded into meta -- it's Dirigera's own structural classification of
+// the device, used to look up which display-fields.toml entry applies
+// (see display-fields.js's resolveFieldDefs), the same way LIRC keys a
+// remote's button mapping by remote model rather than by which physical
+// remote you happen to own.
 export function matchConfiguredDevices(dirigeraDevices, configuredRecords) {
   const byId = new Map(dirigeraDevices.map((device) => [device.id, device]));
   const matches = [];
@@ -64,6 +70,7 @@ export function matchConfiguredDevices(dirigeraDevices, configuredRecords) {
       name,
       transport: "dirigera",
       address: record.address,
+      deviceType: device.deviceType,
       meta: device.attributes,
     });
   }
