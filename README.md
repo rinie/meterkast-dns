@@ -603,6 +603,65 @@ decryption: `version_status` and `version_data` still change whenever the
 device's real state changes, which is a genuine "something happened"
 signal even without knowing what.
 
+### Browsing the resolver: handcoded markdown screens, not a generated UI
+
+Every adapter above answers "how does a *device* get resolved." This one
+is about the *browser* side: how a person actually looks at what the
+resolver knows, at `/screens`.
+
+**The screens are hand-authored `.md` files, not generated.** `public/pages/*.md`
+map to `/screens/:slug` the same way
+[Observable Framework's own file-based routing](https://observablehq.com/framework/routing)
+works — a real markdown file per page, a small hand-maintained sidebar
+list (`public/screens.js`'s `PAGES`, mirroring Framework's own
+`observablehq.config.js` sidebar config) rather than filesystem
+discovery. This is a deliberately different shape from the adapter model
+above: there's no database to generate a screen definition *from* —
+meterkast-dns's own "database" is the TOML playlist plus the in-memory
+registry, not Oracle rows the way an earlier, unrelated prototype
+([`locuswms-web-frontend`](https://github.com/rinie), a Locus WMS web
+frontend) generates its own screens' markdown from. Here, a page's
+markdown *is* the source, the same way any other Observable Framework
+page is.
+
+**Rendered with [observable-forms](https://github.com/rinie/observable-forms),
+vendored under `public/vendor/observable-forms/`.** Its `:::form` syntax
+— a pipe-table grammar, one cell per field, `Label [name] =` for a
+readonly field — renders the detail panel above each page's data grid.
+Selecting a grid row populates that panel's fields by matching
+`[name="key"]`/`[data-name="key"]` against the selected row's own keys,
+the same master-detail pattern `locuswms-web-frontend` already validated
+— object-valued fields (a device's raw `meta`) are shown as their JSON
+text, the same honest-fallback reasoning used everywhere else in this
+design for a value with no better display.
+
+**The data grid is [DataTables](https://datatables.net), fed by a small
+markdown extension: a fenced `` ```datatable `` block naming a live
+JSON endpoint.**
+
+````markdown
+```datatable
+{"endpoint": "/resolved", "columns": ["name", "transport", "address", "resolvedAddress"], "sort": "name"}
+```
+````
+
+`columns`/`header`/`sort`/`reverse` deliberately reuse
+[Observable's own `Inputs.table` option names](https://observablehq.com/framework/inputs/table)
+— DataTables renders denser and, subjectively, nicer than `Inputs.table`
+(confirmed building `locuswms-web-frontend`, which implements both), but
+a page author moving between the two shouldn't have to learn different
+words for the same idea. Expressed as JSON rather than real JS specifically
+because a fenced block in a hand-authored file is not a place to `eval`
+arbitrary code — `public/screens.js` overrides markdown-it's own `fence`
+renderer for exactly this one info-string, so every other fenced block on
+a page (a real code sample) still renders normally.
+
+**Zero new dependencies, browser or server.** `markdown-it` and
+`datatables.net-select-dt` load from a CDN as ES modules, the same
+pattern `web-scan.html` already established for BLE/USB/HID — no
+bundler, no build step, no npm package added to `package.json` for any
+of this.
+
 ### What already exists and should be reused, not reinvented
 
 This is a composition problem more than an invention problem — most of the

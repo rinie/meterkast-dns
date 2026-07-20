@@ -1,10 +1,12 @@
 // The local HTTP API: routing plus every handler. GET /devices,
 // GET /devices/:name, GET /resolved (dns/mdns entries only, normalized to
 // their live-resolved address), GET /events (SSE), POST /devices/:name
-// (generic write path), and the two static pages (/ and /web-scan).
+// (generic write path), the static pages (/, /web-scan, /screens), and a
+// generic static-file path for the screens app's own JS/CSS/vendored
+// plugin/handcoded markdown pages.
 import { createServer as createHttpServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join, dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listRecords, getRecord, upsertRecord, subscribe } from "./registry.js";
 
@@ -98,12 +100,44 @@ export function handleReport(registry, name, req, res) {
   });
 }
 
-const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "public");
+const PUBLIC_DIR = resolve(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "public"));
 
 export async function serveStaticPage(filename, req, res) {
   const html = await readFile(join(PUBLIC_DIR, filename), "utf8");
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end(html);
+}
+
+const STATIC_CONTENT_TYPES = {
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+};
+
+// Backs the screens app's own JS/CSS, the vendored observable-forms
+// plugin, and the handcoded public/pages/*.md files -- every one of
+// those is served as a plain static file, not through a dedicated route
+// per file. `relativePath` is untrusted (comes straight off the request
+// URL), so it's resolved and checked against PUBLIC_DIR before any read
+// -- `resolve()` collapses a `../` traversal attempt, and the prefix
+// check (with a trailing separator, so PUBLIC_DIR itself and a
+// same-named sibling directory can't be confused) rejects anything that
+// escaped it.
+export async function serveStaticFile(relativePath, req, res) {
+  const filePath = resolve(join(PUBLIC_DIR, relativePath));
+  if (filePath !== PUBLIC_DIR && !filePath.startsWith(PUBLIC_DIR + sep)) {
+    res.writeHead(403).end();
+    return;
+  }
+  const contentType = STATIC_CONTENT_TYPES[extname(filePath)] ?? "application/octet-stream";
+  try {
+    const content = await readFile(filePath);
+    res.writeHead(200, { "content-type": contentType });
+    res.end(content);
+  } catch {
+    res.writeHead(404).end();
+  }
 }
 
 export function createServer(registry) {
@@ -128,6 +162,23 @@ export function createServer(registry) {
 
     if (req.method === "GET" && url.pathname === "/web-scan") {
       return serveStaticPage("web-scan.html", req, res);
+    }
+
+    // /screens and /screens/:slug both serve the same shell page --
+    // screens.js parses the real slug from location.pathname client-side
+    // (the standard SPA-fallback pattern), so a hard refresh or a direct
+    // deep link to /screens/devices still works.
+    if (req.method === "GET" && /^\/screens(\/[^/]+)?$/.test(url.pathname)) {
+      return serveStaticPage("screens.html", req, res);
+    }
+
+    // Everything the screens app needs beyond its own shell page --
+    // grid.js, screens.css, the vendored observable-forms plugin, and
+    // the handcoded pages/*.md files -- is a plain static file. Checked
+    // after every other route above, so nothing here can shadow a real
+    // API endpoint.
+    if (req.method === "GET" && /\.(js|css|md|json)$/.test(url.pathname)) {
+      return serveStaticFile(decodeURIComponent(url.pathname.slice(1)), req, res);
     }
 
     const deviceMatch = url.pathname.match(/^\/devices\/([^/]+)$/);

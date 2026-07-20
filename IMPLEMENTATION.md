@@ -72,8 +72,22 @@ test/
     smartbridge-sync-response.json   # real response shape, IDs genericized
   run-all.js                     # see "Testing" below
 public/
-  index.html                     # GET / -- device table, live via SSE, links to web-scan
+  index.html                     # GET / -- device table, live via SSE, links to web-scan/screens
   web-scan.html                  # WebBLE/WebUSB/WebHID page -- see README.md
+  screens.html                   # GET /screens shell -- sidebar + content area
+  screens.js                     # sidebar/router, markdown-it + observable-forms setup,
+                                  # the ```datatable fence rule, row-select -> form population
+  screens.css                    # sidebar/content layout + DataTables density (ported sizes)
+  grid.js                        # DataTables adapter -- see README.md "Browsing the resolver"
+  pages/
+    resolved.md                  # handcoded screen: GET /resolved
+    devices.md                   # handcoded screen: GET /devices
+  vendor/
+    observable-forms/            # vendored from github.com/rinie/observable-forms, MIT
+      markdown-it-form.js
+      form.css
+      LICENSE
+      README.md                  # provenance: exact upstream commit vendored
 device-playlist.example.toml     # fixture/template, committed
 device-playlist.toml             # the real Use-editable data file, gitignored
 backups/                         # dated snapshots, written automatically, gitignored
@@ -157,6 +171,19 @@ backups/                         # dated snapshots, written automatically, gitig
   explicit `devDependency` since `test/dns-adapter.test.js` imports it
   directly to build that fake server; it was never an implicit/phantom
   import.
+- **The screens app (`public/screens.js`/`grid.js`) adds no npm
+  dependency either** — `markdown-it` and `datatables.net-select-dt`
+  load from a CDN as ES modules straight in the browser, the exact
+  pattern `web-scan.html` already used for BLE/USB/HID. `observable-forms`
+  (`markdown-it-form.js`/`form.css`) is vendored under
+  `public/vendor/observable-forms/` rather than an npm dependency because
+  it isn't published to npm at all — it's a markdown-it plugin, not a
+  standalone library, meant to be dropped into a project the way it is
+  here. Vendored from the real upstream repo at a recorded commit (see
+  `public/vendor/observable-forms/README.md`), not copied from the
+  in-progress fork used while building an earlier, unrelated prototype —
+  confirmed identical in substance (only comment wording differed) before
+  trusting it.
 - **WebBLE/WebUSB/WebHID — the only BLE/USB/HID path now** — `handleReport`
   (in `src/core/server.js`) adds a generic `POST /devices/:name`,
   deliberately transport-agnostic (it stores whatever record it's given, no
@@ -373,6 +400,38 @@ as expected) mDNS entries failing gracefully next to all of it. Unlike
 every other adapter in this document, there is no remaining verification
 gap to hand off here — this one is real, tested, and confirmed against
 production infrastructure in the same session it was built.
+
+**The screens app (`/screens`) is real, tested, and — like the DNS
+adapter — verified end to end with no remaining gap, but it surfaced one
+genuine bug along the way, worth recording precisely.** Unit tests cover
+`serveStaticFile` (real files served with the right content-type, a 404
+for a missing one, a 403 for a path-traversal attempt that never reaches
+`readFile`). Before writing any page content, the exact blank-line
+structure `:::form` needs was confirmed empirically against a real
+`markdown-it` instance (a throwaway probe script, not assumed from the
+plugin's own doc-comment example, which turned out to omit the blank
+lines its own tokenizer actually requires between `:::form`, the
+pipe-table content, and the closing `:::`) — and the same probe confirmed
+the `` ```datatable `` fence override renders the expected placeholder
+`<div>`. Then, for real: the daemon was started with the real local
+playlist, `/screens/resolved` and `/screens/devices` were loaded in the
+same Chromium browser pane used throughout this document, both rendered
+their DataTables grid with real data (`raspi3` → `192.168.1.53`; all 12
+real playlist entries respectively) with zero console errors. **A real
+bug was caught this way, not by inspection:** clicking a row correctly
+populated `name`/`transport`/`address` in the detail form but left
+`resolvedAddress` empty — `populateFormFromRow`'s field lookup lowercased
+the row's key before matching `[data-name]`, a rule ported from
+`locuswms-web-frontend`'s app.js where it compensates for Oracle's own
+uppercase column names, which doesn't apply here: meterkast-dns's field
+names are genuine camelCase (`resolvedAddress`), preserved as-is in a
+page's own `[resolvedAddress]` bracket syntax, so the lowercase
+comparison silently never matched. Removed, re-verified live: all four
+fields populate correctly. Also checked a `meta`-holding row
+(`kitchen-lamp`, real Dirigera device attributes) renders its object
+value as readable JSON text in the detail panel, and that sidebar
+navigation updates the URL via the History API without a full page
+reload.
 
 **USB (`udev`), Zigbee (a coordinator), and 433MHz/IR (RC5/newKaku
 decoding) *native background-daemon* adapters remain out of scope
