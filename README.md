@@ -602,7 +602,12 @@ legitimate reason to skip it for a service the whole internet also talks to.
 
 **Ecowitt is a clean, well-behaved API**: `real_time` returns readings as
 `{time, unit, value}` triples, already labeled, already unit-tagged,
-passed through as `meta` the same way Dirigera's `attributes` are.
+passed through as `meta` the same way Dirigera's `attributes` are. One
+real gotcha, confirmed empirically rather than assumed: `temp_unitid`
+defaults to `2` (Fahrenheit) when omitted, regardless of any unit
+preference set in the Ecowitt account/app — the adapter requests
+`temp_unitid=1` (Celsius) explicitly rather than relying on that
+default.
 
 **Smartbridge/ICS2000 is the honest-limit case, confirmed against the real
 API rather than assumed**: its `sync` endpoint returns each device's

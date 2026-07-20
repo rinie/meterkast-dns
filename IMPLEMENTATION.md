@@ -596,6 +596,21 @@ shaped. Real end-to-end confirmation of a *genuinely* resolved entry
 as everything else mDNS/DNS-related in this document, not on anything new
 this endpoint itself introduces.
 
+**Ecowitt's `real_time` endpoint defaults to Fahrenheit, confirmed
+empirically rather than assumed, and now fixed.** A user question ("why
+does the ecowitt display fahrenheit?") led to querying the real API three
+ways with the real credentials: no `temp_unitid` param, `temp_unitid=1`,
+`temp_unitid=2` — the first and third came back identical (`"unit":"ºF"`),
+the second came back `"unit":"℃"`, confirming `2` (Fahrenheit) is the
+server's own default when the parameter is omitted, independent of
+whatever unit preference is set in the Ecowitt account/app itself.
+`fetchEcowittReading` now sends `temp_unitid: "1"` explicitly.
+`test/fixtures/ecowitt-real-time-response.json` was re-captured live
+against the real API with the fix in place (real Celsius values, not
+hand-edited), and the real daemon confirmed it end to end:
+`GET /devices/weather-station` now returns `{"unit":"℃","value":"20.5"}`
+for a real, live reading.
+
 **All three of Dirigera, Ecowitt, and Smartbridge are now verified against
 the real service, not just a local mock — the same tier for all three, not
 a gap between them.** Each adapter's `parse*Response` and (Dirigera,
