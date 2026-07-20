@@ -16,6 +16,7 @@ import { createGrid } from "/grid.js";
 const PAGES = [
   { slug: "resolved", title: "Resolved Names" },
   { slug: "devices", title: "All Devices" },
+  { slug: "discover", title: "Discover Devices" },
   { slug: "logs", title: "Log" },
 ];
 
@@ -64,6 +65,12 @@ function getMarkdownIt() {
       // JS from a hand-authored file without a bigger discussion about
       // trust. Anything with another info string still renders as a
       // normal code block via the default fence renderer.
+      //
+      // {discover: true, buttonLabel?} switches a block into
+      // mountDiscoverGrid's Scan-button flow instead (public/pages/
+      // discover.md) -- endpoint is POSTed on click, not GET-fetched on
+      // page load, since discovery hits a real API on demand rather than
+      // auto-running every page visit.
       const defaultFence = md.renderer.rules.fence.bind(md.renderer.rules);
       md.renderer.rules.fence = (tokens, idx, options, env, self) => {
         const token = tokens[idx];
@@ -151,6 +158,131 @@ function populateDisplayFields(contentEl, row) {
   renderDisplayLines(hiddenContainer, hiddenLines);
 }
 
+// Renders the inline "claim a candidate" mini-form into `cellEl` (a
+// <td>, mutated directly the same way web-scan.html's own statusEl
+// updates a cell without touching DataTables' data model or triggering a
+// redraw) -- an editable text input pre-filled with the candidate's own
+// suggestedName, since that's only ever a starting point (see
+// dirigera-adapter.js's unclaimedDirigeraDevices), not window.prompt():
+// a real bug found by testing, not a style preference -- prompt() blocks
+// the entire tab's JS execution until dismissed, and this project's own
+// browser-automation tooling hung on it outright (a real user could just
+// as easily find a blocking native dialog jarring, e.g. it doesn't
+// respect this page's own styling and pauses everything else on the tab).
+// Enter or the Save button submits; Cancel reverts to the plain button.
+function startAddToPlaylist(row, cellEl) {
+  cellEl.innerHTML = "";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = row.suggestedName ?? "";
+  input.className = "add-to-playlist-name";
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.textContent = "Save";
+  saveButton.className = "scan-action";
+  const cancelButton = document.createElement("button");
+  cancelButton.type = "button";
+  cancelButton.textContent = "Cancel";
+  cancelButton.className = "scan-action";
+  const statusEl = document.createElement("span");
+  statusEl.className = "scan-status";
+  cellEl.append(input, saveButton, cancelButton, statusEl);
+  input.focus();
+  input.select();
+
+  const revertToButton = () => {
+    cellEl.innerHTML =
+      '<button type="button" data-action="add" class="scan-action">Add to playlist</button><span class="scan-status"></span>';
+  };
+  cancelButton.addEventListener("click", revertToButton);
+
+  // POSTs to /playlist/devices and reports the real outcome inline:
+  // success (with the honest note that polling starts only after the
+  // next daemon restart -- device-playlist.toml is a start-time config
+  // file, see server.js's handleAddToPlaylist) or a name collision (with
+  // the server's own suggestedName, editable in place so a retry is one
+  // more Enter press, not starting over).
+  const submit = async () => {
+    const name = input.value.trim();
+    if (!name) {
+      statusEl.textContent = "name required";
+      return;
+    }
+    input.disabled = true;
+    saveButton.disabled = true;
+    const body = { name, transport: row.transport, address: row.address };
+    if (row.deviceType) body.deviceType = row.deviceType;
+    const res = await fetch("/playlist/devices", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      statusEl.textContent = `ERROR: ${json.error}${json.suggestedName ? ` (try "${json.suggestedName}")` : ""}`;
+      input.disabled = false;
+      saveButton.disabled = false;
+      return;
+    }
+    cellEl.textContent = "Added -- restart meterkastd to start polling this device.";
+  };
+  const submitAndReportErrors = () => submit().catch((error) => { statusEl.textContent = `ERROR: ${error.message}`; });
+  saveButton.addEventListener("click", submitAndReportErrors);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submitAndReportErrors();
+  });
+}
+
+// A ```datatable block with `"discover": true` (public/pages/discover.md)
+// is a POST-triggered scan, not the usual GET-on-load: discovery hits a
+// real hub/cloud API on demand, once per click, not something to re-run
+// automatically every page visit the way a plain device list is. Renders
+// a Scan button (empty grid area until clicked) instead of auto-loading;
+// each resulting row gets its own "Add to playlist" action -- the same
+// per-row-button pattern (grid.js's onAction) web-scan.html's
+// Connect/Read buttons already use.
+function mountDiscoverGrid(el, config) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = config.buttonLabel ?? `Scan ${config.endpoint}`;
+  button.className = "scan-action";
+  const gridEl = document.createElement("div");
+  el.append(button, gridEl);
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    const originalLabel = button.textContent;
+    button.textContent = "Scanning...";
+    try {
+      const res = await fetch(config.endpoint, { method: "POST" });
+      const rows = await res.json();
+      if (!res.ok) {
+        gridEl.textContent = `ERROR: ${rows.error ?? res.status}`;
+        return;
+      }
+      const columns = config.columns?.map((key) => ({ key, label: config.header?.[key] ?? key }));
+      await createGrid(gridEl, rows, {
+        columns: columns && [
+          ...columns,
+          {
+            key: null,
+            label: "",
+            render: () =>
+              `<button type="button" data-action="add" class="scan-action">Add to playlist</button><span class="scan-status"></span>`,
+          },
+        ],
+        onAction: (row, action, actionEl) => {
+          if (action !== "add") return;
+          startAddToPlaylist(row, actionEl.closest("td"));
+        },
+      });
+    } finally {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  });
+}
+
 // One live EventSource per page load (not per grid -- a page only
 // realistically needs one), closed before the next page's content
 // replaces this one. `config.live` on a ```datatable block names the SSE
@@ -167,6 +299,10 @@ async function mountDataTables(contentEl) {
   const liveTargets = [];
   for (const el of contentEl.querySelectorAll(".datatable-grid")) {
     const config = JSON.parse(el.dataset.config);
+    if (config.discover) {
+      mountDiscoverGrid(el, config);
+      continue;
+    }
     const rows = await fetch(config.endpoint).then((res) => res.json());
     const columns = config.columns?.map((key) => ({ key, label: config.header?.[key] ?? key }));
     const grid = await createGrid(el, rows, {

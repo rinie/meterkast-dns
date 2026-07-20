@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import dirigeraAdapter, {
   parseDirigeraResponse,
   matchConfiguredDevices,
+  unclaimedDirigeraDevices,
   fetchDirigeraDevices,
 } from "../src/adapters/dirigera-adapter.js";
 
@@ -56,6 +57,36 @@ test("matchConfiguredDevices carries forward extra playlist fields it doesn't it
   assert.deepEqual(matches, [
     { name: "kitchen-lamp", transport: "dirigera", address: "dev-1", deviceType: "light", displayFields: ["On"], meta: { isOn: true } },
   ]);
+});
+
+test("unclaimedDirigeraDevices returns real devices not matched by any playlist entry, suggests a name from customName", () => {
+  const dirigeraDevices = [
+    { id: "dev-1", deviceType: "light", attributes: { customName: "Kitchen2", isOn: true } },
+    { id: "dev-2", deviceType: "motionSensor", attributes: { customName: "ShedSensor2", batteryPercentage: 20 } },
+  ];
+  const configuredRecords = {
+    "kitchen-lamp": { transport: "dirigera", address: "dev-1" },
+  };
+
+  const candidates = unclaimedDirigeraDevices(dirigeraDevices, configuredRecords);
+
+  assert.deepEqual(candidates, [
+    {
+      transport: "dirigera",
+      address: "dev-2",
+      deviceType: "motionSensor",
+      suggestedName: "shedsensor2",
+      meta: { customName: "ShedSensor2", batteryPercentage: 20 },
+    },
+  ]);
+});
+
+test("unclaimedDirigeraDevices falls back to deviceType-id when customName is blank", () => {
+  const dirigeraDevices = [{ id: "abcdef1234567890", deviceType: "lightSensor", attributes: { customName: "", illuminance: 0 } }];
+
+  const candidates = unclaimedDirigeraDevices(dirigeraDevices, {});
+
+  assert.equal(candidates[0].suggestedName, "lightSensor-abcdef12");
 });
 
 test("matchConfiguredDevices ignores configured devices Dirigera didn't return", () => {

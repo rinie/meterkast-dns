@@ -861,6 +861,45 @@ pieces already exist somewhere, just not connected:
   today but is bundled into one large platform rather than exposed as a
   small, standalone resolver anything else could query directly
 
+### Discovering unclaimed devices
+
+Every adapter above only ever reports devices already named in the
+playlist. `/screens/discover` answers the opposite question — what's out
+there, real, but not yet claimed? For a hub/cloud transport that already
+fetches its full inventory every poll cycle (Dirigera, Smartbridge), this
+is nearly free: `unclaimedDirigeraDevices`/`unclaimedSmartbridgeDevices`
+(in each adapter's own file) are the mirror image of `matchConfiguredDevices`
+— every real device whose id *isn't* claimed by a playlist entry, with a
+`suggestedName` (from the device's own `customName` where the API
+provides one, else `${deviceType}-${id}` — only ever a starting point, not
+assumed final).
+
+`POST /discover/:transport` runs one scan on demand — a real hit against
+the real hub/cloud API, triggered by clicking "Scan," never a background
+poll. `POST /playlist/devices` claims a candidate under a real name:
+`addPlaylistEntry` (in `playlist.js`) writes it into
+`device-playlist.toml` through the same `writePlaylist` backup +
+atomic-write path any hand-edit already uses, rejecting a name collision
+with `409` and a `suggestedName` rather than silently overwriting or
+guessing. The claimed device shows up in `GET /devices` immediately (it's
+upserted into the live registry too) — but its adapter only starts
+*polling* it after the next `meterkastd` restart, since
+`device-playlist.toml` is read once at startup (`runPollingAdapter`
+snapshots the registry into each adapter generator a single time; see
+`run-polling-adapter.js`). The UI states this plainly rather than implying
+live data appears immediately.
+
+mDNS discovery (browsing `_services._dns-sd._udp.local` for arbitrary LAN
+devices, rather than resolving an already-configured hostname) and DNS
+discovery (a reverse-PTR subnet sweep) are both deliberately not built
+here — mDNS is parked on this project's own development machine
+specifically (its Windows Firewall only allows mDNS for `svchost.exe`, not
+`node.exe`, so there's no way to real-verify a browse pass the way every
+other piece of this project has been verified before shipping); DNS
+discovery has no protocol-level "browse" at all and would need a genuinely
+different mechanism. Both can be added the same way once warranted,
+without changing anything documented here.
+
 ### Honest limits
 
 - This does not remove the first-contact ceremony — it relocates it to a
@@ -871,6 +910,18 @@ pieces already exist somewhere, just not connected:
 - Unlike DNS, there is no existing universal deployment or authority for this
   — it only works if something (the user, or eventually a shared open
   project) actually runs the adapters and the core.
+- **A programmatic write to `device-playlist.toml` (currently only
+  `addPlaylistEntry`, via "Add to playlist") strips every comment and
+  reformats the whole file.** `writePlaylist` round-trips the entire
+  playlist through `smol-toml`'s `parse`+`stringify`, which has no concept
+  of comments at all — a real, confirmed-live cost, not a hypothetical
+  one. Nothing is destroyed (the same write's own pre-write
+  `snapshotPlaylist` backup captures the prior, comment-intact file first,
+  the same safety net every hand-edit already gets), but a user who wants
+  their explanatory comments back after an "Add to playlist" click has to
+  restore them from that backup by hand. A real fix would need a
+  comment-preserving TOML writer, which `smol-toml` doesn't provide —
+  not attempted here.
 - This is a proposal that extends the logic already established in the
   Gutenberg/Semantic series, not a report of something that already exists in
   this composed form. Where individual pieces already exist (udev, mDNS,

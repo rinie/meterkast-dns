@@ -84,6 +84,46 @@ export function matchConfiguredDevices(dirigeraDevices, configuredRecords) {
   return matches;
 }
 
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// The inverse of matchConfiguredDevices: every real Dirigera device that
+// isn't already claimed by a playlist entry (`transport: "dirigera"`
+// records, matched by device id, same as matchConfiguredDevices' own
+// `byId` lookup) -- the raw material for GET /discover/dirigera, a
+// user-triggered "what's out there but unnamed" scan (see server.js's
+// handleDiscover), not something this adapter's own polling loop calls.
+// `suggestedName` is only ever a starting point, never assumed final --
+// slugified from the device's own `customName` when Dirigera set one
+// (most devices have one; a fresh-out-of-box device may not), else
+// `${deviceType}-${id.slice(0,8)}` -- deliberately not just the raw
+// device id, which is a UUID, not a name anyone would want to type
+// twice.
+export function unclaimedDirigeraDevices(dirigeraDevices, configuredRecords) {
+  const claimedIds = new Set(
+    Object.values(configuredRecords)
+      .filter((record) => record.transport === "dirigera")
+      .map((record) => record.address),
+  );
+  return dirigeraDevices
+    .filter((device) => !claimedIds.has(device.id))
+    .map((device) => {
+      const customName = device.attributes?.customName;
+      const suggestedName = customName ? slugify(customName) : `${device.deviceType}-${device.id.slice(0, 8)}`;
+      return {
+        transport: "dirigera",
+        address: device.id,
+        deviceType: device.deviceType,
+        suggestedName,
+        meta: device.attributes,
+      };
+    });
+}
+
 // Polls Dirigera's REST API on an interval and yields one record per
 // configured device on each poll. `records` is the flat registry slice
 // this adapter reads from -- playlist entries with transport = "dirigera",
