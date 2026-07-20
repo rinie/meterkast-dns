@@ -27,17 +27,28 @@ function resolveColumns(rows, columns) {
 let renderToken = 0;
 
 // columns: [{key, label}] or undefined (defaults to every key on the
-// first row). sort/reverse mirror Observable's Inputs.table option names
-// (observablehq.com/framework/inputs/table), translated to DataTables'
-// own `order` option -- the ```datatable fence block in a page's
-// markdown uses those same names, so a page author moving from one to
-// the other doesn't have to learn different words for the same thing.
-export async function createGrid(container, rows, { onSelect, columns, sort, reverse = false } = {}) {
+// first row -- only possible when there IS a first row; with zero rows
+// and no explicit columns there's genuinely no schema to infer, so that
+// combination alone shows a plain empty-state message instead of a
+// zero-column table shell). sort/reverse mirror Observable's Inputs.table
+// option names (observablehq.com/framework/inputs/table), translated to
+// DataTables' own `order` option -- the ```datatable fence block in a
+// page's markdown uses those same names. rowClassKey: a row field (e.g.
+// "level") whose value becomes a `row-${value}` CSS class on that <tr> --
+// the log screen's error/warn/info/debug color-coding, kept narrowly
+// scoped to this one need rather than a generic styling callback (a JSON
+// fence config can't carry a real function).
+//
+// Returns a handle with `addRow(row)` for live-appending -- used by the
+// log screen's SSE-driven updates, not needed by a page that only ever
+// loads a static snapshot.
+export async function createGrid(container, rows, { onSelect, columns, sort, reverse = false, rowClassKey } = {}) {
   container.innerHTML = "";
   const token = ++renderToken;
-  if (rows.length === 0) {
+  const resolvedColumns = resolveColumns(rows, columns);
+  if (resolvedColumns.length === 0) {
     container.textContent = "No rows.";
-    return;
+    return null;
   }
 
   ensureCss("https://cdn.jsdelivr.net/npm/datatables.net-dt@2/css/dataTables.dataTables.min.css");
@@ -51,9 +62,8 @@ export async function createGrid(container, rows, { onSelect, columns, sort, rev
   // (clicks do nothing, no error) -- the real bug that was hit building
   // the original locuswms-web-frontend version of this file.
   const { default: DataTable } = await import("https://cdn.jsdelivr.net/npm/datatables.net-select-dt@2/+esm");
-  if (token !== renderToken) return; // a newer createGrid() call already superseded this one
+  if (token !== renderToken) return null; // a newer createGrid() call already superseded this one
 
-  const resolvedColumns = resolveColumns(rows, columns);
   const tableEl = document.createElement("table");
   tableEl.style.width = "100%";
   container.append(tableEl);
@@ -65,15 +75,20 @@ export async function createGrid(container, rows, { onSelect, columns, sort, rev
   // a large row count, not DataTables' own pagination. lengthMenu always
   // includes the real count so the dropdown reflects a real, selected
   // value instead of an unlisted number.
-  const lengthMenu = [...new Set([100, 500, 1000, rows.length])].sort((a, b) => a - b);
+  const lengthMenu = [...new Set([100, 500, 1000, rows.length || 1])].sort((a, b) => a - b);
 
   const table = new DataTable(tableEl, {
     data: rows,
     columns: dtColumns,
     select: "single",
-    pageLength: rows.length,
+    pageLength: rows.length || 10,
     lengthMenu,
     order: sortIndex === -1 ? [] : [[sortIndex, reverse ? "desc" : "asc"]],
+    createdRow: rowClassKey
+      ? (tr, rowData) => {
+          if (rowData[rowClassKey]) tr.classList.add(`row-${rowData[rowClassKey]}`);
+        }
+      : undefined,
   });
 
   const notifySelection = () => {
@@ -82,4 +97,10 @@ export async function createGrid(container, rows, { onSelect, columns, sort, rev
   };
   table.on("select", notifySelection);
   table.on("deselect", notifySelection);
+
+  return {
+    addRow(row) {
+      table.row.add(row).draw(false);
+    },
+  };
 }

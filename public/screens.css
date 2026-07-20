@@ -77,3 +77,12 @@ body {
 .datatable-grid .dt-search input, .datatable-grid .dt-length select { font-size: 11px; padding: 0.15rem 0.3rem; }
 
 .datatable-error { color: #a00; }
+
+/* Level-based row coloring for the Log screen (grid.js's rowClassKey ->
+   row-${level}), the same at-a-glance error/warn distinction
+   Domoticz/Home Assistant's own log views use. */
+.datatable-grid tbody tr.row-error { background: #fde2e2 !important; }
+.datatable-grid tbody tr.row-error:hover { background: #fbd0d0 !important; }
+.datatable-grid tbody tr.row-warn { background: #fff3cd !important; }
+.datatable-grid tbody tr.row-warn:hover { background: #ffe9a8 !important; }
+.datatable-grid tbody tr.row-debug { color: #888; }

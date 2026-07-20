@@ -662,6 +662,18 @@ pattern `web-scan.html` already established for BLE/USB/HID — no
 bundler, no build step, no npm package added to `package.json` for any
 of this.
 
+**The Log screen (`/screens/logs`) is the same pattern, live.** The
+backend keeps a bounded, timestamped record of its own recent activity
+— `src/core/log.js`, a Domoticz/Home-Assistant-style rolling log, since
+there's no database to persist a real one in. A `` ```datatable `` block's
+`live: true` tells `public/screens.js` to also open an `EventSource` on
+the existing `/events` connection (a `"log"` named event alongside the
+`"change"` events device updates already use — one connection, two event
+types, not a second SSE endpoint) and append each new entry to the grid
+as it happens, no page reload. `rowClassKey: "level"` colors each row by
+severity (error/warn/info/debug), the same at-a-glance distinction those
+other dashboards' log views use.
+
 ### What already exists and should be reused, not reinvented
 
 This is a composition problem more than an invention problem — most of the

@@ -8,6 +8,7 @@ import ecowittAdapter from "../src/adapters/ecowitt-adapter.js";
 import smartbridgeAdapter from "../src/adapters/smartbridge-adapter.js";
 import mdnsAdapter from "../src/adapters/mdns-adapter.js";
 import dnsAdapter from "../src/adapters/dns-adapter.js";
+import { log } from "../src/core/log.js";
 
 const playlistPath =
   process.env.METERKAST_PLAYLIST ?? new URL("../device-playlist.toml", import.meta.url);
@@ -16,7 +17,8 @@ const registry = createRegistry();
 
 const playlist = await readPlaylist(playlistPath).catch((error) => {
   if (error.code === "ENOENT") {
-    console.warn(
+    log(
+      "warn",
       `No device-playlist.toml found at ${playlistPath} -- starting empty. ` +
         "Copy device-playlist.example.toml to device-playlist.toml to get started.",
     );
@@ -42,12 +44,12 @@ const pollingAdapters = [
 ];
 for (const [transport, label, adapterFn] of pollingAdapters) {
   runPollingAdapter(registry, transport, adapterFn).catch((error) => {
-    console.error(`${label} adapter stopped:`, error.message);
+    log("error", `${label} adapter stopped: ${error.message}`);
   });
 }
 
 const server = createServer(registry);
 const port = Number(process.env.PORT ?? 8420);
 server.listen(port, () => {
-  console.log(`meterkast-dns listening on http://localhost:${port}`);
+  log("info", `meterkast-dns listening on http://localhost:${port}`);
 });

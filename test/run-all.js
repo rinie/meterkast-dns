@@ -16,3 +16,4 @@ import "./smartbridge.test.js";
 import "./run-polling-adapter.test.js";
 import "./mdns.test.js";
 import "./dns-adapter.test.js";
+import "./log.test.js";

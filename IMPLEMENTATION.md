@@ -39,6 +39,7 @@ src/
     secrets.js               # resolveSecretEnv -- env var name -> value, or a clear error
     run-polling-adapter.js    # shared wiring: check transport, run, upsert
     offsite.js                 # git-backed offsite sync: init, commit, push, orchestrate
+    log.js                      # bounded timestamped log buffer + subscribe -- see README.md
     server.js                   # createServer + every route handler + static-page serving
   adapters/
     load-adapters.js            # dynamic import() loader
@@ -64,6 +65,7 @@ test/
   smartbridge.test.js
   mdns.test.js
   dns-adapter.test.js
+  log.test.js
   run-polling-adapter.test.js
   fixtures/
     test-cert.pem                    # throwaway self-signed cert for HTTPS tests
@@ -82,6 +84,7 @@ public/
   pages/
     resolved.md                  # handcoded screen: GET /resolved
     devices.md                   # handcoded screen: GET /devices
+    logs.md                      # handcoded screen: GET /logs, live via SSE
   vendor/
     observable-forms/            # vendored from github.com/rinie/observable-forms, MIT
       markdown-it-form.js
@@ -432,6 +435,23 @@ fields populate correctly. Also checked a `meta`-holding row
 value as readable JSON text in the detail panel, and that sidebar
 navigation updates the URL via the History API without a full page
 reload.
+
+**The Log screen (`/screens/logs`) is verified live, not just on a
+static snapshot — including the SSE-append path, without needing a
+synthetic trigger.** `handleLogs` and `log.js`'s own `log`/`listLogs`/
+`subscribeLogs` are unit tested (bounded buffer, snapshot-not-live-
+reference, subscribe/unsubscribe). Then, for real: the daemon was started
+with the real playlist, `/screens/logs` loaded showing 5 real entries
+(the startup message plus four real mDNS failures from the still-open
+Windows Firewall gap), correctly sorted newest-first, each `warn` row
+colored (`rgb(255, 243, 205)`, confirmed via `getComputedStyle`, not just
+assumed from the CSS). Without any action taken in the browser, the next
+real 60-second mDNS retry cycle fired server-side and its four new
+`log()` calls arrived over the existing `/events` SSE connection and were
+appended live — the count went from 5 to 9 entries with the page just
+sitting open, the same "watch it happen" behavior the design section
+describes, observed actually happening rather than assumed from the
+code.
 
 **USB (`udev`), Zigbee (a coordinator), and 433MHz/IR (RC5/newKaku
 decoding) *native background-daemon* adapters remain out of scope

@@ -6,6 +6,7 @@
 // plain hostname like `printer.local` -- both are transport = "mdns" in
 // the playlist already, so one adapter covers both address shapes.
 import createMdns from "multicast-dns";
+import { log } from "../core/log.js";
 
 // A DNS-SD service pattern looks like "_mqtt._tcp.local": service type,
 // protocol, domain. A plain hostname like "printer.local" has none of that
@@ -139,7 +140,7 @@ export default async function* mdnsAdapter(records, { intervalMs = 60000, timeou
             : await resolveHostname(mdns, record.address, { timeoutMs });
           yield { ...record, name, meta: resolved };
         } catch (error) {
-          console.error(`mDNS resolution failed for ${name}:`, error.message);
+          log("warn", `mDNS resolution failed for ${name}: ${error.message}`);
         }
       }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));

@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createRegistry, getRecord, upsertRecord } from "../src/core/registry.js";
-import { handleReport, serveStaticPage, serveStaticFile, handleResolved, summarizeResolution } from "../src/core/server.js";
+import { handleReport, serveStaticPage, serveStaticFile, handleResolved, summarizeResolution, handleLogs } from "../src/core/server.js";
+import { log } from "../src/core/log.js";
 
 function fakeRequestWithBody(bodyString) {
   const req = new EventEmitter();
@@ -156,4 +157,15 @@ test("serveStaticFile rejects a path-traversal attempt with 403, never reads out
   await serveStaticFile("../package.json", {}, res);
 
   assert.equal(res.statusCode, 403);
+});
+
+test("handleLogs returns recent log entries as JSON, including one just logged", () => {
+  log("info", "handleLogs test unique message");
+
+  const res = fakeResponse();
+  handleLogs({}, res);
+
+  assert.equal(res.statusCode, 200);
+  const logs = JSON.parse(res.body);
+  assert.ok(logs.some((entry) => entry.message === "handleLogs test unique message" && entry.level === "info"));
 });
