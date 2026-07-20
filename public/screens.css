@@ -91,7 +91,7 @@ body {
 
 .datatable-error { color: #a00; }
 
-/* A selected row's curated display-fields.toml lines (see screens.js's
+/* A selected row's curated display-fields/ lines (see screens.js's
    populateDisplayFields) -- a few larger, console-like readouts above
    the detail form's raw field grid, not another dense table row. */
 #display-fields:empty { display: none; }
@@ -103,6 +103,22 @@ body {
   border-radius: 4px;
 }
 .display-field-line { font-size: 14px; line-height: 1.6; }
+
+/* Lines a device's own displayFields/excludeDisplayFields playlist filter
+   left out of the primary panel above -- real values, deliberately set
+   aside rather than shown by default, so styled to read as secondary
+   (muted, collapsed by default via the <details> element itself) rather
+   than competing with the curated lines for attention. */
+#display-fields-hidden-details {
+  margin: 0 0 1rem;
+  padding: 0.4rem 0.75rem;
+  background: #f7f7f7;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  color: #666;
+}
+#display-fields-hidden-details summary { cursor: pointer; font-size: 13px; }
+#display-fields-hidden { margin-top: 0.4rem; }
 
 /* Level-based row coloring for the Log screen (grid.js's rowClassKey ->
    row-${level}), the same at-a-glance error/warn distinction

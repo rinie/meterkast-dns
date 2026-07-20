@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { flattenDisplayFields, loadDisplayFields, resolveFieldDefs } from "../src/core/display-fields.js";
+import { flattenDisplayFields, loadDisplayFields, resolveFieldDefs, partitionDisplayLines } from "../src/core/display-fields.js";
 
 const ECOWITT_META = {
   indoor: {
@@ -38,18 +38,48 @@ test("flattenDisplayFields returns an empty array for missing meta or missing fi
   assert.deepEqual(flattenDisplayFields(undefined, ECOWITT_META), []);
 });
 
-test("loadDisplayFields reads and parses a real file", async () => {
+test("loadDisplayFields reads a flat fields array from <transport>.toml, keyed by filename", async () => {
   const dir = await mkdtemp(join(tmpdir(), "meterkast-"));
-  const path = join(dir, "display-fields.toml");
   try {
     await writeFile(
-      path,
-      '[[displayFields.ecowitt]]\nlabel = "Indoor Temperature"\nvaluePath = "indoor.temperature.value"\nunitPath = "indoor.temperature.unit"\n',
+      join(dir, "ecowitt.toml"),
+      '[[fields]]\nlabel = "Indoor Temperature"\nvaluePath = "indoor.temperature.value"\nunitPath = "indoor.temperature.unit"\n',
     );
-    const displayFields = await loadDisplayFields(path);
+    const displayFields = await loadDisplayFields(dir);
     assert.deepEqual(displayFields.ecowitt, [
       { label: "Indoor Temperature", valuePath: "indoor.temperature.value", unitPath: "indoor.temperature.unit" },
     ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadDisplayFields reads a deviceType-keyed table (no top-level fields array) as-is, merges multiple transport files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "meterkast-"));
+  try {
+    await writeFile(join(dir, "ecowitt.toml"), '[[fields]]\nlabel = "Indoor Temperature"\nvaluePath = "indoor.temperature.value"\n');
+    await writeFile(
+      join(dir, "dirigera.toml"),
+      '[[light]]\nlabel = "On"\nvaluePath = "isOn"\nformat = "boolean"\n\n[[outlet]]\nlabel = "On"\nvaluePath = "isOn"\nformat = "boolean"\n',
+    );
+    const displayFields = await loadDisplayFields(dir);
+    assert.deepEqual(displayFields.ecowitt, [{ label: "Indoor Temperature", valuePath: "indoor.temperature.value" }]);
+    assert.deepEqual(displayFields.dirigera, {
+      light: [{ label: "On", valuePath: "isOn", format: "boolean" }],
+      outlet: [{ label: "On", valuePath: "isOn", format: "boolean" }],
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadDisplayFields ignores non-.toml files in the directory", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "meterkast-"));
+  try {
+    await writeFile(join(dir, "ecowitt.toml"), '[[fields]]\nlabel = "Indoor Temperature"\nvaluePath = "indoor.temperature.value"\n');
+    await writeFile(join(dir, "README.md"), "not a display-fields file\n");
+    const displayFields = await loadDisplayFields(dir);
+    assert.deepEqual(Object.keys(displayFields), ["ecowitt"]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -86,10 +116,44 @@ test("resolveFieldDefs returns undefined for an unconfigured transport", () => {
   assert.equal(resolveFieldDefs({}, "bluetooth", undefined), undefined);
 });
 
-test("loadDisplayFields returns {} when the file doesn't exist, same graceful-degradation shape as readPlaylist", async () => {
+const SAMPLE_LINES = [
+  { label: "On", display: "Off" },
+  { label: "Brightness", display: "70.0 %" },
+  { label: "Color", display: "Warm White" },
+];
+
+test("partitionDisplayLines with neither include nor exclude shows everything, hides nothing", () => {
+  assert.deepEqual(partitionDisplayLines(SAMPLE_LINES), { shown: SAMPLE_LINES, hidden: [] });
+  assert.deepEqual(partitionDisplayLines(SAMPLE_LINES, {}), { shown: SAMPLE_LINES, hidden: [] });
+});
+
+test("partitionDisplayLines with an allow-list shows only those labels, hides the rest", () => {
+  const result = partitionDisplayLines(SAMPLE_LINES, { include: ["On"] });
+  assert.deepEqual(result.shown, [{ label: "On", display: "Off" }]);
+  assert.deepEqual(result.hidden, [
+    { label: "Brightness", display: "70.0 %" },
+    { label: "Color", display: "Warm White" },
+  ]);
+});
+
+test("partitionDisplayLines with a deny-list hides only those labels, shows the rest", () => {
+  const result = partitionDisplayLines(SAMPLE_LINES, { exclude: ["Color"] });
+  assert.deepEqual(result.shown, [
+    { label: "On", display: "Off" },
+    { label: "Brightness", display: "70.0 %" },
+  ]);
+  assert.deepEqual(result.hidden, [{ label: "Color", display: "Warm White" }]);
+});
+
+test("partitionDisplayLines with both set: the allow-list wins outright, exclude is ignored", () => {
+  const result = partitionDisplayLines(SAMPLE_LINES, { include: ["On"], exclude: ["On"] });
+  assert.deepEqual(result.shown, [{ label: "On", display: "Off" }]);
+});
+
+test("loadDisplayFields returns {} when the directory doesn't exist, same graceful-degradation shape as readPlaylist", async () => {
   const dir = await mkdtemp(join(tmpdir(), "meterkast-"));
   try {
-    const displayFields = await loadDisplayFields(join(dir, "nonexistent.toml"));
+    const displayFields = await loadDisplayFields(join(dir, "nonexistent-dir"));
     assert.deepEqual(displayFields, {});
   } finally {
     await rm(dir, { recursive: true, force: true });

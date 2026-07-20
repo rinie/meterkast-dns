@@ -13,11 +13,11 @@ import { log } from "../src/core/log.js";
 
 const playlistPath =
   process.env.METERKAST_PLAYLIST ?? new URL("../device-playlist.toml", import.meta.url);
-const displayFieldsPath =
-  process.env.METERKAST_DISPLAY_FIELDS ?? new URL("../display-fields.toml", import.meta.url);
+const displayFieldsDir =
+  process.env.METERKAST_DISPLAY_FIELDS_DIR ?? new URL("../display-fields/", import.meta.url);
 
 const registry = createRegistry();
-const displayFields = await loadDisplayFields(displayFieldsPath);
+const displayFields = await loadDisplayFields(displayFieldsDir);
 
 const playlist = await readPlaylist(playlistPath).catch((error) => {
   if (error.code === "ENOENT") {

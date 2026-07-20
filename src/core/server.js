@@ -13,19 +13,33 @@ import { join, dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listRecords, getRecord, upsertRecord, subscribe } from "./registry.js";
 import { listLogs, subscribeLogs } from "./log.js";
-import { flattenDisplayFields, resolveFieldDefs } from "./display-fields.js";
+import { flattenDisplayFields, resolveFieldDefs, partitionDisplayLines } from "./display-fields.js";
 
-// `display` adds a few curated, formatted lines (display-fields.toml,
+// `display` adds a few curated, formatted lines (display-fields/,
 // keyed by transport, or by transport+deviceType for a hub like Dirigera
 // that fans out to structurally different device types) alongside a
 // record's raw `meta` -- never replaces it, since not every
 // transport/deviceType has a mapping defined. Absent/empty `displayFields`
-// (no display-fields.toml, or nothing configured for this transport) is
+// (no display-fields/, or nothing configured for this transport) is
 // exactly what flattenDisplayFields already treats as "no lines," so this
 // never has to special-case that itself.
+//
+// A device can further narrow the catalog's lines down to just the ones
+// it cares about, via two optional playlist keys carried straight through
+// onto the record (`record.displayFields`/`record.excludeDisplayFields`
+// -- upsertRecord/the adapters already pass arbitrary extra playlist
+// fields through untouched, so no new plumbing was needed to get these
+// here). `displayHidden` is what got filtered out -- real, already-fetched
+// values, not re-fetched or re-labeled, so a device's own hidden fields
+// stay checkable without permanently re-enabling them.
 function withDisplay(record, displayFields) {
   const fieldDefs = resolveFieldDefs(displayFields, record.transport, record.deviceType);
-  return { ...record, display: flattenDisplayFields(fieldDefs, record.meta) };
+  const lines = flattenDisplayFields(fieldDefs, record.meta);
+  const { shown, hidden } = partitionDisplayLines(lines, {
+    include: record.displayFields,
+    exclude: record.excludeDisplayFields,
+  });
+  return { ...record, display: shown, displayHidden: hidden };
 }
 
 export function handleList(registry, displayFields, req, res) {

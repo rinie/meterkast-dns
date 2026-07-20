@@ -31,6 +31,19 @@ raspi3.address   = "raspi3.home"
 kitchen-lamp.transport = "dirigera"
 kitchen-lamp.address   = "<dirigera-device-id>"
 
+# Optional, per device: narrow display-fields/dirigera.toml's `light`
+# catalog down to just the lines this device cares about -- an allow-list
+# (only these labels show) or a deny-list (everything except these), never
+# both on the same device (the allow-list wins if both are set). Neither
+# key: every catalog line shows, the default. See README.md "Flattening
+# nested readings for display".
+# hallway-lamp.transport           = "dirigera"
+# hallway-lamp.address             = "<dirigera-device-id>"
+# hallway-lamp.displayFields       = ["On"]
+# another-lamp.transport           = "dirigera"
+# another-lamp.address             = "<dirigera-device-id>"
+# another-lamp.excludeDisplayFields = ["Brightness"]
+
 # Ecowitt is a cloud API (ECOWITT_APPLICATION_KEY, ECOWITT_API_KEY in
 # .env), not a local hub like Dirigera -- see README.md "Extending to
 # cloud vendor APIs" for why that's a real, honestly-stated difference.

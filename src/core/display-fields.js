@@ -1,11 +1,13 @@
 // Flattens a device's nested `meta` (Ecowitt's real_time response, say --
 // {outdoor: {temperature: {value, unit}}}) into a few curated, formatted
-// display lines, driven by display-fields.toml -- mirroring a device's
-// own physical console rather than dumping every field the API happens
-// to return. Same "normalize a differing meta shape into one clean
-// field" spirit as server.js's summarizeResolution for dns/mdns, just
+// display lines, driven by display-fields/ -- mirroring a device's own
+// physical console rather than dumping every field the API happens to
+// return. Same "normalize a differing meta shape into one clean field"
+// spirit as server.js's summarizeResolution for dns/mdns, just
 // hand-configurable per transport instead of hardcoded.
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse } from "smol-toml";
 
 function getPath(obj, path) {
@@ -60,6 +62,42 @@ export function flattenDisplayFields(fieldDefs, meta) {
   return lines;
 }
 
+// Splits an already-flattened `{label, display}` line array into `shown`
+// (the primary curated lines) and `hidden` (real, already-formatted
+// values that exist in the catalog but this specific device chose not to
+// show by default) -- per-device narrowing on top of display-fields/'s
+// per-transport/deviceType catalog, driven by two optional
+// device-playlist.toml keys: `displayFields` (an allow-list of labels --
+// only these show) or `excludeDisplayFields` (a deny-list -- everything
+// except these shows). Neither set: every catalog line shows, today's
+// behavior, unchanged. Both set on one device: `include` wins outright --
+// documented, not silently merged, since "show only X" and "show
+// everything but Y" answer different questions and combining them would
+// just be guessing which one the device actually meant.
+//
+// `hidden` isn't a UI decision this function makes -- it's the same
+// values the catalog would have shown, just set aside, so a caller (the
+// /screens/devices detail panel's collapsed "Hidden fields" section) can
+// let someone check whether a deliberately-hidden field's live value
+// still looks sane, without permanently re-enabling it.
+export function partitionDisplayLines(lines, { include, exclude } = {}) {
+  if (include && include.length > 0) {
+    const allowed = new Set(include);
+    return {
+      shown: lines.filter((line) => allowed.has(line.label)),
+      hidden: lines.filter((line) => !allowed.has(line.label)),
+    };
+  }
+  if (exclude && exclude.length > 0) {
+    const denied = new Set(exclude);
+    return {
+      shown: lines.filter((line) => !denied.has(line.label)),
+      hidden: lines.filter((line) => denied.has(line.label)),
+    };
+  }
+  return { shown: lines, hidden: [] };
+}
+
 // displayFields[transport] is either a flat array (Ecowitt: one uniform
 // response shape, deviceType doesn't apply) or an object keyed by
 // deviceType (Dirigera: one hub fans out to structurally different
@@ -74,18 +112,47 @@ export function resolveFieldDefs(displayFields, transport, deviceType) {
   return entry[deviceType];
 }
 
-// Returns {transport: [{label, valuePath, unitPath?}]} -- empty object
-// (every transport just gets no display lines) when the file doesn't
-// exist, the same graceful-degradation shape readPlaylist already uses
-// for a missing device-playlist.toml.
-export async function loadDisplayFields(path) {
-  let text;
+// One file per transport (display-fields/ecowitt.toml,
+// display-fields/dirigera.toml, ...) -- the same "one file per chapter"
+// granularity as the rest of this project, and specifically to avoid a
+// single shared file growing merge conflicts across independent
+// transports' PRs (the exact friction a two-file device-playlist.toml/
+// display-fields.toml split was originally built to avoid, just one
+// layer further in). The filename is the transport name; a file's own
+// content therefore never repeats it, unlike the old single-file
+// `[[displayFields.ecowitt]]` shape.
+//
+// A parsed file with a top-level `fields` array is flat (Ecowitt: one
+// uniform response shape). Otherwise every top-level key is a deviceType
+// whose own array is used directly (Dirigera: one hub, structurally
+// different device types) -- the same flat-vs-nested distinction
+// resolveFieldDefs already makes on the merged in-memory shape, just
+// decided once per file at load time instead of at lookup time.
+//
+// Returns {transport: [...] | {deviceType: [...]}} -- empty object (every
+// transport just gets no display lines) when the directory doesn't exist,
+// the same graceful-degradation shape readPlaylist already uses for a
+// missing device-playlist.toml.
+export async function loadDisplayFields(dir) {
+  // bin/meterkastd.js passes a file:// URL (relative to import.meta.url);
+  // readdir/readFile both accept that directly, but path.join doesn't --
+  // normalized to a plain string path once here rather than at every
+  // call site.
+  const dirPath = dir instanceof URL ? fileURLToPath(dir) : dir;
+  let filenames;
   try {
-    text = await readFile(path, "utf8");
+    filenames = await readdir(dirPath);
   } catch (error) {
     if (error.code === "ENOENT") return {};
     throw error;
   }
-  const parsed = parse(text);
-  return parsed.displayFields ?? {};
+  const displayFields = {};
+  for (const filename of filenames) {
+    if (extname(filename) !== ".toml") continue;
+    const transport = basename(filename, ".toml");
+    const text = await readFile(join(dirPath, filename), "utf8");
+    const parsed = parse(text);
+    displayFields[transport] = parsed.fields ?? parsed;
+  }
+  return displayFields;
 }

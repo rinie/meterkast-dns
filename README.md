@@ -716,10 +716,16 @@ temperature three levels deep (`outdoor.temperature.{value,unit}`), and
 correctly but unreadably. The fix is the same shape as `GET /resolved`'s
 `summarizeResolution` (normalize a differing shape into one clean field),
 generalized into a hand-editable mapping instead of hardcoded per
-transport: `display-fields.toml`.
+transport: `display-fields/`, one TOML file per transport
+(`display-fields/ecowitt.toml`, `display-fields/dirigera.toml`, ...) — the
+same "one file per chapter" granularity the rest of this project follows,
+and specifically to avoid a single shared file collecting merge friction
+across independent transports' changes (see "Why one file per transport"
+below).
 
 ```toml
-[[displayFields.ecowitt]]
+# display-fields/ecowitt.toml
+[[fields]]
 label     = "Indoor Temperature"
 valuePath = "indoor.temperature.value"
 unitPath  = "indoor.temperature.unit"
@@ -746,19 +752,21 @@ it's a sensible default for anyone using the same integration. `/screens/devices
 detail panel renders these lines above the raw `meta`, never instead of
 it — the full reading is always one click away.
 
-Ecowitt's API always answers the same shape, so `displayFields.ecowitt`
-is a flat array. A hub like Dirigera doesn't — one hub fans out to
+Ecowitt's API always answers the same shape, so `ecowitt.toml` is a flat
+`[[fields]]` array. A hub like Dirigera doesn't — one hub fans out to
 structurally different device types (a light's `isOn`/`lightLevel` mean
-nothing for a door sensor's `isOpen`), so `displayFields.dirigera` is
-instead a table keyed by `deviceType`:
+nothing for a door sensor's `isOpen`), so `dirigera.toml` is instead a
+table keyed by `deviceType`, one top-level array per type instead of a
+single `fields` key:
 
 ```toml
-[[displayFields.dirigera.light]]
+# display-fields/dirigera.toml
+[[light]]
 label     = "On"
 valuePath = "isOn"
 format    = "boolean"
 
-[[displayFields.dirigera.light]]
+[[light]]
 label     = "Brightness"
 valuePath = "lightLevel"
 unit      = "%"
@@ -767,28 +775,78 @@ unit      = "%"
 `deviceType` (`light`, `outlet`, `motionSensor`, ...) is Dirigera's own
 structural classification of the device — `matchConfiguredDevices` in
 `dirigera-adapter.js` surfaces it verbatim as `device.deviceType`, a peer
-field alongside `meta`, not folded into it. `resolveFieldDefs` in
-`display-fields.js` picks the right shape: a flat array is returned as-is
-(Ecowitt), an object is looked up by `deviceType` (Dirigera). Two new
-field shapes support this: a literal `unit` string (Dirigera has no
-per-reading unit field to point at the way Ecowitt does — `lightLevel` is
-always `%`, so it's written directly rather than as a `unitPath`) and
-`format = "boolean"` (renders `isOn`/`isOpen`/etc as `On`/`Off` instead of
-running them through the numeric formatter). All six deviceType examples
-committed (`light`, `outlet`, `motionSensor`, `openCloseSensor`,
-`waterSensor`, `environmentSensor`) are verified against a real Dirigera
-hub's real attributes, not guessed from API docs — see IMPLEMENTATION.md.
+field alongside `meta`, not folded into it. `loadDisplayFields` in
+`display-fields.js` reads every `*.toml` file in `display-fields/` and
+decides the shape once per file: a top-level `fields` array means flat
+(Ecowitt), otherwise every top-level key is a deviceType whose own array
+is used directly (Dirigera). `resolveFieldDefs` then looks up the
+already-merged, in-memory `{transport: [...] | {deviceType: [...]}}` the
+same way regardless of which shape a given transport's file used. Two new
+field shapes support the Dirigera case: a literal `unit` string (Dirigera
+has no per-reading unit field to point at the way Ecowitt does —
+`lightLevel` is always `%`, so it's written directly rather than as a
+`unitPath`) and `format = "boolean"` (renders `isOn`/`isOpen`/etc as
+`On`/`Off` instead of running them through the numeric formatter). All six
+deviceType examples committed (`light`, `outlet`, `motionSensor`,
+`openCloseSensor`, `waterSensor`, `environmentSensor`) are verified
+against a real Dirigera hub's real attributes, not guessed from API docs
+— see IMPLEMENTATION.md.
 
 The key design question was *what* to key the Dirigera table by. The
 first draft keyed it by device *name* (`kitchen-lamp`), which collapses
-under its own logic: `display-fields.toml` is committed specifically
-because it's generic and shareable, and a device name is neither — it's
-the same personal, Use-chosen identifier `device-playlist.toml` already
-owns. `deviceType` is a structural, API-provided property instead, so
-keying by it keeps the file generic: anyone with a Dirigera hub gets a
-working `light` mapping without editing anything, the same way LIRC's own
-remote `.conf` files are keyed by remote *model* — a shared, community-
-maintained catalog — never by which specific physical remote a user owns.
+under its own logic: `display-fields/` is committed specifically because
+it's generic and shareable, and a device name is neither — it's the same
+personal, Use-chosen identifier `device-playlist.toml` already owns.
+`deviceType` is a structural, API-provided property instead, so keying by
+it keeps the file generic: anyone with a Dirigera hub gets a working
+`light` mapping without editing anything, the same way LIRC's own remote
+`.conf` files are keyed by remote *model* — a shared, community-maintained
+catalog — never by which specific physical remote a user owns.
+
+**Why one file per transport, not one shared `display-fields.toml`:**
+this file started out single, and a genuinely useful question came up
+while it only had two transports in it — "now you have 2 tomls [(the
+playlist and this one)], would 1 toml not be more appropriate?" The answer
+for *that* split still holds (trust/commit boundary: personal vs.
+generic), but the same underlying friction reappears one layer down as
+more transports get added to a single `display-fields.toml`: unrelated
+transports' entries sitting in one file means unrelated changes (a new
+Ecowitt field, a new Dirigera deviceType, a future third transport)
+collide in the same diff for no structural reason. Splitting by transport
+— filename *is* the key, so a file's own content never has to repeat it —
+removes that friction the same way `device-playlist.toml` vs.
+`display-fields/` already removed it at the personal/generic boundary.
+
+**Narrowing the catalog further, per device.** `display-fields/`'s catalog
+is transport/deviceType-wide — every light gets the same `On`/`Brightness`
+lines. Not every device with the same `deviceType` wants the same lines
+shown, though (two lights, only one of which you care about brightness
+for), so `device-playlist.toml` supports two optional keys on any device
+entry:
+
+```toml
+hallway-lamp.transport     = "dirigera"
+hallway-lamp.address       = "<dirigera-device-id>"
+hallway-lamp.displayFields = ["On"]              # allow-list: only these labels show
+```
+
+or, on a different device, a deny-list instead (`excludeDisplayFields`,
+"everything except these"). Neither key: every catalog line shows, today's
+default. Both set on the same device: the allow-list wins outright, not
+merged — "show only X" and "show everything but Y" answer different
+questions, so combining them would just be guessing which one was meant.
+This lives in `device-playlist.toml`, not `display-fields/`, on purpose:
+it's Use-specific ("I don't care about this device's brightness"), the
+same personal/generic split the two files already draw everywhere else.
+
+A field narrowed out isn't gone from the response, just moved:
+`GET /devices/:name` returns both `display` (the shown lines) and
+`displayHidden` (the filtered-out ones, still real, already-formatted
+values, not re-fetched or relabeled). `/screens/devices`' detail panel
+renders `displayHidden` in a collapsed "Hidden fields" section below the
+primary lines — click to check a hidden field's current value without
+permanently re-enabling it, useful for confirming a vendor API's shape
+hasn't quietly changed underneath a field you stopped watching.
 
 This is a composition problem more than an invention problem — most of the
 pieces already exist somewhere, just not connected:
