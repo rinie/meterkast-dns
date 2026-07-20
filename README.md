@@ -623,6 +623,13 @@ redirects there). The original plain live-SSE device table still exists,
 just relocated to `/table`, for whoever wants that single always-live
 view without the sidebar/markdown-page layer.
 
+`/screens` itself has a real home page — `pages/index.md`, an overview
+with links to every regular page plus `/table` and `/web-scan` — rather
+than silently auto-selecting whichever page happens to be listed first
+in the sidebar. The distinction matters the same way it does in
+Observable Framework itself: `index.md` is the landing page, not just
+one more entry in the page list.
+
 **The screens are hand-authored `.md` files, not generated.** `public/pages/*.md`
 map to `/screens/:slug` the same way
 [Observable Framework's own file-based routing](https://observablehq.com/framework/routing)

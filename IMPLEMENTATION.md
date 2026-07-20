@@ -82,6 +82,7 @@ public/
   screens.css                    # sidebar/content layout + DataTables density (ported sizes)
   grid.js                        # DataTables adapter -- see README.md "Browsing the resolver"
   pages/
+    index.md                     # bare /screens' own home page -- overview + links, not a PAGES entry
     resolved.md                  # handcoded screen: GET /resolved
     devices.md                   # handcoded screen: GET /devices
     logs.md                      # handcoded screen: GET /logs, live via SSE
@@ -518,11 +519,29 @@ bug in the sidebar's own code — the sidebar was never on that page to
 begin with. Fixed at the routing layer, not the client: `GET /` now
 `302`s to `/screens`, making the screens app the actual default landing
 experience, with the old page relocated to `/table` rather than
-removed (see "Library choices" above). Verified live: a fresh browser
-tab hitting the bare root followed the redirect, landed on
-`/screens/resolved` with the sidebar rendering correctly, and `/table`
-still serves the classic live table with real data and working
-cross-links back to `/screens`.
+removed (see "Library choices" above).
+
+**A third round of the same thread refined this further, and it's worth
+recording as its own real finding, not folded silently into the fix
+above: landing on `/screens/resolved` was itself the wrong default,
+even though the sidebar was now genuinely visible.** The user's own
+words — "you use[d] screens/resolved not base index.htm[l]" — named the
+actual complaint precisely: auto-selecting the first `PAGES` entry
+("Resolved Names") as the bare-`/screens` default conflated "the default
+landing page" with "the first regular page," the same distinction
+Observable Framework's own `index.md` makes from every other page it
+lists. Fixed with a real `pages/index.md` (an overview page, with plain
+markdown links to the three regular pages, `/table`, and `/web-scan`) and
+a `HOME_SLUG` constant deliberately kept out of `PAGES` — bare `/screens`
+now renders that page's own content, with a new "meterkast-dns" home
+link at the top of the sidebar (styled distinctly, `#sidebar-home`) the
+only thing marked active there, rather than silently redirecting to
+`/screens/resolved`. Verified live: the URL now stays at the clean
+`/screens` (not rewritten to `/screens/resolved`), the home link and its
+`active` state render correctly, clicking into a regular page and back to
+home both work, and the browser's own Back button correctly restores the
+previous page via `popstate` — round-tripped for real, not just reasoned
+about.
 
 **The Log screen (`/screens/logs`) is verified live, not just on a
 static snapshot — including the SSE-append path, without needing a
