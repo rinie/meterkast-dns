@@ -901,19 +901,31 @@ scan, not an error (same `ENOTFOUND`/`ENODATA` treatment
 `resolveDnsHostname` already gives those two codes).
 
 Unlike the hub transports, there's no *universal* default for "which
-subnet" — but a real LAN's own subnet doesn't change from scan to scan,
-so an optional one lives in `.env` as `METERKAST_DNS_CIDR`, the same
-reasoning `DIRIGERA_HOSTNAME` already follows (real, instance-specific
-config, not a secret, shouldn't be hardcoded into a committed file
-either). The request's own `cidr` query param still wins when present —
+subnet" — three tiers, most-specific wins: the request's own `cidr` query
+param (a one-off scan of somewhere else), `METERKAST_DNS_CIDR` in `.env`
+(real, instance-specific config the user set explicitly, same reasoning
+`DIRIGERA_HOSTNAME` already follows — not a secret, shouldn't be
+hardcoded into a committed file either), or `detectLocalCidr`'s own
+auto-detection from this machine's real network interfaces as a last
+resort. A real laptop often has more than one active non-internal
+interface at once — this project's own dev machine runs a corporate VPN
+client (`Centric Azure VPN`) alongside its real Wi-Fi adapter — so
+auto-detection prefers the first interface whose name doesn't look
+VPN-like (a best-effort, name-based heuristic; there's no OS-portable API
+flag for "this is a VPN"), falling back to whatever's there if every
+candidate looks VPN-like rather than finding nothing at all.
+
 `/screens/discover`'s DNS panel pre-fills its input from
-`GET /discover/dns/default-cidr` if a default is configured, but stays
-editable for a one-off scan of somewhere else; no default configured (or
-the pre-fill fetch failing) just leaves the plain placeholder hint, same
-as before this existed. Clicking Scan with neither a typed value nor a
-configured default throws a clear message rather than guessing — caught
-client-side too now, before the request, after a real report of the
-error reading like a bug rather than "you forgot to type something."
+`GET /discover/dns/default-cidr` whenever any tier resolved something,
+and labels *which* tier right next to the field (`(METERKAST_DNS_CIDR)`
+or `(auto-detected from "Wi-Fi")`) — an auto-detected value is never a
+silent guess, and the field stays editable either way for a one-off scan
+of somewhere else. Nothing resolved at all just leaves the plain
+placeholder hint, same as before any of this existed. Clicking Scan with
+neither a typed value nor anything resolved throws a clear message rather
+than guessing — caught client-side too, before the request, after a real
+report of the error reading like a bug rather than "you forgot to type
+something."
 
 Bluetooth is the odd one out: Web Bluetooth has no server-side inventory
 to scan at all — its whole security model is a real user gesture picking

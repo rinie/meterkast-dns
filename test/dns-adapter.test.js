@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import dgram from "node:dgram";
 import dnsPromises from "node:dns/promises";
 import dnsPacket from "dns-packet";
-import { resolveDnsHostname, hostAddressesInCidr, scanSubnet, unclaimedDnsCandidates } from "../src/adapters/dns-adapter.js";
+import { resolveDnsHostname, hostAddressesInCidr, scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from "../src/adapters/dns-adapter.js";
 
 // Real local unicast DNS, not a mock of the wire protocol -- a tiny UDP
 // server built on dns-packet (already installed transitively via
@@ -139,4 +139,48 @@ test("unclaimedDnsCandidates filters out hostnames already claimed as transport=
   assert.deepEqual(candidates, [
     { transport: "dns", address: "printer2.home", suggestedName: "printer2-home", meta: { ip: "192.168.1.77" } },
   ]);
+});
+
+// Fixture shape captured from this project's own real dev machine's
+// os.networkInterfaces() -- a real corporate VPN client ("Centric Azure
+// VPN") active alongside a real Wi-Fi LAN adapter, plus the always-present
+// loopback. Not synthesized: this exact ambiguity (two real, simultaneous
+// non-internal IPv4 interfaces, one of them a VPN) is why the VPN-name
+// heuristic exists at all.
+const REAL_LAPTOP_INTERFACES = {
+  "Wi-Fi": [
+    { address: "192.168.1.57", netmask: "255.255.255.0", family: "IPv4", internal: false },
+  ],
+  "Centric Azure VPN": [
+    { address: "172.22.33.40", netmask: "255.255.255.255", family: "IPv4", internal: false },
+  ],
+  "Loopback Pseudo-Interface 1": [
+    { address: "127.0.0.1", netmask: "255.0.0.0", family: "IPv4", internal: true },
+  ],
+};
+
+test("detectLocalCidr prefers the real LAN interface over an active VPN's own adapter", () => {
+  assert.deepEqual(detectLocalCidr(REAL_LAPTOP_INTERFACES), { cidr: "192.168.1.0/24", interfaceName: "Wi-Fi" });
+});
+
+test("detectLocalCidr masks the interface's own host address down to the true network address", () => {
+  const interfaces = { Ethernet: [{ address: "10.0.5.200", netmask: "255.255.255.0", family: "IPv4", internal: false }] };
+  assert.deepEqual(detectLocalCidr(interfaces), { cidr: "10.0.5.0/24", interfaceName: "Ethernet" });
+});
+
+test("detectLocalCidr falls back to the only candidate even if it looks VPN-like, rather than returning nothing", () => {
+  const interfaces = { "Corp VPN": [{ address: "10.8.0.5", netmask: "255.255.255.0", family: "IPv4", internal: false }] };
+  assert.deepEqual(detectLocalCidr(interfaces), { cidr: "10.8.0.0/24", interfaceName: "Corp VPN" });
+});
+
+test("detectLocalCidr ignores internal (loopback) and non-IPv4 addresses", () => {
+  const interfaces = {
+    Loopback: [{ address: "127.0.0.1", netmask: "255.0.0.0", family: "IPv4", internal: true }],
+    Wi6: [{ address: "fe80::1", netmask: "ffff:ffff:ffff:ffff::", family: "IPv6", internal: false }],
+  };
+  assert.equal(detectLocalCidr(interfaces), undefined);
+});
+
+test("detectLocalCidr returns undefined when there are no non-internal IPv4 addresses at all", () => {
+  assert.equal(detectLocalCidr({}), undefined);
 });

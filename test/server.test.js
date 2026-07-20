@@ -356,18 +356,25 @@ test("handleDiscover forwards the request's own query params to the discover fun
   assert.equal(receivedQuery.get("cidr"), "192.168.1.0/30");
 });
 
-test("handleDnsDefaultCidr returns the configured default", () => {
+test("handleDnsDefaultCidr returns the configured default with its source, e.g. METERKAST_DNS_CIDR", () => {
   const res = fakeResponse();
-  handleDnsDefaultCidr("192.168.1.0/24", {}, res);
+  handleDnsDefaultCidr("192.168.1.0/24", "METERKAST_DNS_CIDR", {}, res);
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(JSON.parse(res.body), { cidr: "192.168.1.0/24" });
+  assert.deepEqual(JSON.parse(res.body), { cidr: "192.168.1.0/24", source: "METERKAST_DNS_CIDR" });
 });
 
-test("handleDnsDefaultCidr returns null when no default is configured, not an error", () => {
+test("handleDnsDefaultCidr labels an auto-detected default as such, never a silent guess", () => {
   const res = fakeResponse();
-  handleDnsDefaultCidr(undefined, {}, res);
+  handleDnsDefaultCidr("192.168.1.0/24", 'auto-detected from "Wi-Fi"', {}, res);
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(JSON.parse(res.body), { cidr: null });
+  assert.deepEqual(JSON.parse(res.body), { cidr: "192.168.1.0/24", source: 'auto-detected from "Wi-Fi"' });
+});
+
+test("handleDnsDefaultCidr returns null cidr and null source when nothing resolved, not an error", () => {
+  const res = fakeResponse();
+  handleDnsDefaultCidr(undefined, undefined, {}, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body), { cidr: null, source: null });
 });
 
 test("handleAddToPlaylist writes a real entry to disk (backup + atomic write, same as any hand-edit) and upserts it into the live registry immediately", async () => {
