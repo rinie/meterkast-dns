@@ -392,6 +392,24 @@ event specifically (`handle-subscribe.js` sends a named event, not the SSE
 default `message` event, which is easy to get wrong and was checked
 against the actual source rather than assumed).
 
+**`GET /resolved` — a filtered view of `GET /devices`, scoped to
+`dns`/`mdns` entries that actually resolved, with each adapter's differing
+`meta` shape normalized to one `resolvedAddress` field — is unit tested
+(`summarizeResolution`'s three shapes, `handleResolved`'s filtering) and
+was run for real against the live daemon.** Started with the real local
+playlist: `GET /devices` returned all 12 configured entries,
+`GET /resolved` correctly returned `[]` (nothing has actually resolved in
+this environment yet — every `mdns` entry is still blocked by the Windows
+Firewall gap documented above, and the `dns` adapter isn't merged to
+`main` as of this branch). Confirmed the endpoint isn't just returning an
+empty array unconditionally by `POST`ing a synthetic `dns`-transport
+reading directly (the same generic write path WebBLE/WebUSB/WebHID use)
+and re-querying `GET /resolved`: it appeared immediately, correctly
+shaped. Real end-to-end confirmation of a *genuinely* resolved entry
+(`raspi3.home` showing up here, say) is blocked on the same two open gaps
+as everything else mDNS/DNS-related in this document, not on anything new
+this endpoint itself introduces.
+
 **All three of Dirigera, Ecowitt, and Smartbridge are now verified against
 the real service, not just a local mock — the same tier for all three, not
 a gap between them.** Each adapter's `parse*Response` and (Dirigera,
@@ -448,6 +466,7 @@ cp device-playlist.example.toml device-playlist.toml   # your real, gitignored c
 npm start                       # loads .env automatically if you have one, no flag needed
 curl http://localhost:8420/devices                     # PORT=8420 by default
 curl http://localhost:8420/devices/myHpPrinter
+curl http://localhost:8420/resolved                     # dns/mdns entries only, normalized to their live address
 curl -N http://localhost:8420/events                    # streams SSE change events
 ```
 
