@@ -889,16 +889,27 @@ snapshots the registry into each adapter generator a single time; see
 `run-polling-adapter.js`). The UI states this plainly rather than implying
 live data appears immediately.
 
-mDNS discovery (browsing `_services._dns-sd._udp.local` for arbitrary LAN
-devices, rather than resolving an already-configured hostname) and DNS
-discovery (a reverse-PTR subnet sweep) are both deliberately not built
-here — mDNS is parked on this project's own development machine
-specifically (its Windows Firewall only allows mDNS for `svchost.exe`, not
-`node.exe`, so there's no way to real-verify a browse pass the way every
-other piece of this project has been verified before shipping); DNS
-discovery has no protocol-level "browse" at all and would need a genuinely
-different mechanism. Both can be added the same way once warranted,
-without changing anything documented here.
+Plain DNS has no protocol-level "browse" the way mDNS's `_services.
+_dns-sd._udp.local` meta-query does, so its own discovery mechanism is
+different: `scanSubnet` (in `dns-adapter.js`) reverse-PTR-queries every
+host address in a user-supplied CIDR (capped at `/22`..`/32` — 1024
+addresses at most, so a typo can't turn into a sweep of a much larger
+range), and `unclaimedDnsCandidates` filters out any hostname already
+claimed by a `transport: "dns"` entry. Unlike the hub transports, there's
+no sane server-side default for "which subnet" — the CIDR is a real input
+on `/screens/discover`'s own DNS panel, not guessed. Most addresses on a
+real LAN have no PTR record at all; that's the expected, normal outcome
+for most of a scan, not an error (same `ENOTFOUND`/`ENODATA` treatment
+`resolveDnsHostname` already gives those two codes).
+
+mDNS discovery (browsing for arbitrary LAN devices advertising over
+Bonjour, rather than resolving an already-configured hostname) is
+deliberately not built here — parked on this project's own development
+machine specifically, since its Windows Firewall only allows mDNS for
+`svchost.exe`, not `node.exe`, so there's no way to real-verify a browse
+pass the way every other piece of this project has been verified before
+shipping. Can be added the same way once warranted (or once verified from
+a different host), without changing anything documented here.
 
 ### Honest limits
 

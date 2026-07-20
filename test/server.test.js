@@ -318,7 +318,7 @@ test("handleDiscover returns a transport's candidates as JSON", async () => {
   };
   const res = fakeResponse();
 
-  await handleDiscover(discoverFns, "dirigera", {}, res);
+  await handleDiscover(discoverFns, "dirigera", new URLSearchParams(), {}, res);
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), [{ transport: "dirigera", address: "dev-9", suggestedName: "shed-sensor", meta: {} }]);
@@ -326,7 +326,7 @@ test("handleDiscover returns a transport's candidates as JSON", async () => {
 
 test("handleDiscover responds 404 for a transport with no discovery function wired up", async () => {
   const res = fakeResponse();
-  await handleDiscover({}, "dns", {}, res);
+  await handleDiscover({}, "dns", new URLSearchParams(), {}, res);
   assert.equal(res.statusCode, 404);
 });
 
@@ -334,10 +334,25 @@ test("handleDiscover responds 502 when the discovery function itself fails (a re
   const discoverFns = { dirigera: async () => { throw new Error("DIRIGERA_HOSTNAME is not set"); } };
   const res = fakeResponse();
 
-  await handleDiscover(discoverFns, "dirigera", {}, res);
+  await handleDiscover(discoverFns, "dirigera", new URLSearchParams(), {}, res);
 
   assert.equal(res.statusCode, 502);
   assert.deepEqual(JSON.parse(res.body), { error: "DIRIGERA_HOSTNAME is not set" });
+});
+
+test("handleDiscover forwards the request's own query params to the discover function -- DNS's cidr has no sane server-side default", async () => {
+  let receivedQuery;
+  const discoverFns = {
+    dns: async (query) => {
+      receivedQuery = query;
+      return [];
+    },
+  };
+  const res = fakeResponse();
+
+  await handleDiscover(discoverFns, "dns", new URLSearchParams("cidr=192.168.1.0/30"), {}, res);
+
+  assert.equal(receivedQuery.get("cidr"), "192.168.1.0/30");
 });
 
 test("handleAddToPlaylist writes a real entry to disk (backup + atomic write, same as any hand-edit) and upserts it into the live registry immediately", async () => {

@@ -154,15 +154,19 @@ export function handleReport(registry, name, req, res) {
 
 // POST /discover/:transport -- a user-triggered "scan now" for real
 // devices that exist but aren't in the playlist yet (an unrecognized
-// Dirigera device, an unpaired ICS2000 plug, ...). Deliberately not a
-// background poll: this hits the real API on demand, once, when someone
-// clicks Scan on /screens/discover, not every interval forever.
-// `discoverFns` is `{transport: () => Promise<candidate[]>}`, wired up in
-// bin/meterkastd.js (it owns the real credentials/hostnames, same as
-// each adapter's own polling generator does) -- server.js stays
+// Dirigera device, an unpaired ICS2000 plug, an unclaimed DNS hostname).
+// Deliberately not a background poll: this hits the real API/network on
+// demand, once, when someone clicks Scan on /screens/discover, not every
+// interval forever. `discoverFns` is `{transport: (query) => Promise<candidate[]>}`,
+// wired up in bin/meterkastd.js (it owns the real credentials/hostnames,
+// same as each adapter's own polling generator does) -- server.js stays
 // transport-agnostic, same as everywhere else in this design, knowing
-// only that a discovery function exists or it doesn't.
-export async function handleDiscover(discoverFns, transport, req, res) {
+// only that a discovery function exists or it doesn't. `query` is the
+// request's own URLSearchParams, passed through untouched -- most
+// discover functions ignore it (Dirigera/Smartbridge need nothing beyond
+// their own credentials), DNS's subnet sweep reads `cidr` from it since
+// that has no sane server-side default.
+export async function handleDiscover(discoverFns, transport, query, req, res) {
   const discoverFn = discoverFns[transport];
   if (!discoverFn) {
     res.writeHead(404, { "content-type": "application/json" });
@@ -170,7 +174,7 @@ export async function handleDiscover(discoverFns, transport, req, res) {
     return;
   }
   try {
-    const candidates = await discoverFn();
+    const candidates = await discoverFn(query);
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(candidates));
   } catch (error) {
@@ -313,7 +317,7 @@ export function createServer(registry, displayFields = {}, { playlistPath, disco
 
     const discoverMatch = url.pathname.match(/^\/discover\/([^/]+)$/);
     if (req.method === "POST" && discoverMatch) {
-      return handleDiscover(discover, decodeURIComponent(discoverMatch[1]), req, res);
+      return handleDiscover(discover, decodeURIComponent(discoverMatch[1]), url.searchParams, req, res);
     }
 
     if (req.method === "POST" && url.pathname === "/playlist/devices") {

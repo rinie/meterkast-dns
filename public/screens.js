@@ -241,7 +241,21 @@ function startAddToPlaylist(row, cellEl) {
 // each resulting row gets its own "Add to playlist" action -- the same
 // per-row-button pattern (grid.js's onAction) web-scan.html's
 // Connect/Read buttons already use.
+//
+// `cidrInput: true` (DNS's own subnet sweep, which has no sane
+// server-side default to fall back on the way Dirigera/Smartbridge's own
+// inventory calls do) renders a text input next to the Scan button and
+// appends its value as `?cidr=` on the endpoint -- every other transport
+// just omits this and scans with no query string at all.
 function mountDiscoverGrid(el, config) {
+  let cidrInputEl;
+  if (config.cidrInput) {
+    cidrInputEl = document.createElement("input");
+    cidrInputEl.type = "text";
+    cidrInputEl.placeholder = config.cidrPlaceholder ?? "192.168.1.0/24";
+    cidrInputEl.className = "add-to-playlist-name";
+    el.append(cidrInputEl);
+  }
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = config.buttonLabel ?? `Scan ${config.endpoint}`;
@@ -254,7 +268,10 @@ function mountDiscoverGrid(el, config) {
     const originalLabel = button.textContent;
     button.textContent = "Scanning...";
     try {
-      const res = await fetch(config.endpoint, { method: "POST" });
+      const endpoint = cidrInputEl
+        ? `${config.endpoint}?cidr=${encodeURIComponent(cidrInputEl.value)}`
+        : config.endpoint;
+      const res = await fetch(endpoint, { method: "POST" });
       const rows = await res.json();
       if (!res.ok) {
         gridEl.textContent = `ERROR: ${rows.error ?? res.status}`;
