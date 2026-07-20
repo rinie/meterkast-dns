@@ -46,6 +46,7 @@ src/
     dirigera-adapter.js          # fetch + parse + match + polling loop, all of it
     ecowitt-adapter.js           # fetch + parse + polling loop, all of it
     smartbridge-adapter.js       # fetch + parse + match + polling loop, all of it
+    mdns-adapter.js              # PTR/SRV/A/TXT resolution + polling loop, all of it
 bin/
   meterkastd.js                  # entrypoint: loads the playlist, starts the server
   sync-backups.js                 # cron-friendly: pushes backups/ offsite
@@ -60,6 +61,7 @@ test/
   dirigera.test.js
   ecowitt.test.js
   smartbridge.test.js
+  mdns.test.js
   run-polling-adapter.test.js
   fixtures/
     test-cert.pem                    # throwaway self-signed cert for HTTPS tests
@@ -133,6 +135,17 @@ backups/                         # dated snapshots, written automatically, gitig
   on any platform, for anyone, and the security-audit surface it removed
   along with it was real (`npm audit` went from 7 high-severity findings,
   all in `node-gyp`'s own transitive tooling, to 0).
+- **`multicast-dns` for mDNS/DNS-SD, the project's second and only other
+  dependency** — same diligence applied before adding it as before removing
+  `noble`: `npm view` showed its only dependencies are `thunky` and
+  `dns-packet` (which itself depends only on `@leichtgewicht/ip-codec`),
+  and after `npm install` all four packages' directories were checked for
+  `.node` binaries or a `binding.gyp` — none exist. Pure JS, no build step,
+  same as `smol-toml`. It speaks raw mDNS packets over `dgram`, which is
+  the actual, minimal thing this adapter needs — pulling in a full MQTT
+  client (`mqtt`) was deliberately out of scope, since the motivating
+  problem this project set out to fix is specifically the broker's
+  *address* being hardcoded, not building a general MQTT pub/sub bridge.
 - **WebBLE/WebUSB/WebHID — the only BLE/USB/HID path now** — `handleReport`
   (in `src/core/server.js`) adds a generic `POST /devices/:name`,
   deliberately transport-agnostic (it stores whatever record it's given, no
@@ -276,9 +289,61 @@ real OS picker opening is verified; a real USB or HID device plugged in or
 paired is needed to verify anything past that, same as the still-open gap
 for Dirigera-style real-hardware testing elsewhere in this document.
 
-**USB (`udev`), Zigbee (a coordinator), MQTT (mDNS/DNS-SD), and 433MHz/IR
-(RC5/newKaku decoding) *native background-daemon* adapters remain out of
-scope entirely** — `static-adapter.js` still exists to pin down the plain
+**The mDNS/DNS-SD adapter is real, tested against a real (if local) wire
+protocol, and hit one honest, specific gap trying to go further.**
+`isServiceQuery` and `decodeTxt` are pure and unit tested.
+`resolveHostname` and `resolveService` are tested against a *second real
+`multicast-dns` instance in the same test process acting as a fake
+responder* — genuine UDP multicast on `224.0.0.251:5353`, the real wire
+protocol, not a mock of it, the same "real local infrastructure standing
+in for a real remote peer" tier as the cloud adapters' self-signed HTTPS
+servers. The exact response shapes those tests assert against
+(`PTR` data as a string, `SRV` data as `{priority, weight, port, target}`,
+`TXT` data as `Buffer[]`, `A` data as a plain IPv4 string) were confirmed
+by actually running that responder/resolver pair and inspecting the real
+output before writing the assertions, not assumed from memory. `bin/meterkastd.js`
+was then run for real with `myHpPrinter`/`mqtt-broker` `mdns`-transport
+entries in a real `device-playlist.toml`: both failed to resolve (no `A`
+record for `printer.local`, no `PTR` answer for `_mqtt._tcp.local`), each
+logged a clear per-device error, and the daemon kept running with Dirigera,
+Ecowitt, and Smartbridge still serving real data alongside it — the same
+isolation already verified for a missing credential now confirmed for a
+missing mDNS responder too. **What that real-LAN attempt did *not*
+establish, and this time with a diagnosed cause, not just a suspected
+one:** this dev machine's own IP is confirmed on the same
+`192.168.1.0/24` subnet as the already-verified-reachable Dirigera hub,
+yet even the universal `_services._dns-sd._udp.local` meta-query got no
+response, and neither did a real, known-good, same-subnet target
+(`homeassistant.local` — Home Assistant's `zeroconf` integration, on by
+default, publishes exactly this hostname). The same machine's own
+`ping homeassistant.local` succeeded immediately, resolving to a
+link-local IPv6 address (`fe80::...`) — proving the device is live and
+genuinely mDNS-reachable on this network. The difference: `ping` resolves
+`.local` names through Windows' own DNS Client service (`svchost.exe`),
+and `Get-NetFirewallRule` confirms the built-in "mDNS (UDP-In)" allow
+rule is scoped specifically to that binary. Chrome, Edge, and Copilot each
+carry their *own* dedicated per-app mDNS inbound rules; `node.exe` has
+none. So this project's outbound mDNS queries leave the machine fine (no
+outbound blocking by default), but the multicast responses coming back
+are dropped by Windows Firewall before they reach the Node process —
+a per-app inbound rule gap, not a code defect, and not a silent LAN. Two
+things follow: `resolveHostname`/`resolveService` were extended to query
+`ANY` rather than hardcoding `A`, and to fall back to `AAAA`, once the
+`homeassistant.local` case surfaced that a live, reachable device can be
+IPv6-only on `.local` — a real, observed case (see
+`test/mdns.test.js`'s "IPv6-only" test, modeled directly on this
+finding), not a hypothetical. That fix is verified against the same
+real-protocol test tier as everything else here, but it did not change
+the real-LAN result, exactly as expected: the packets never arrive at
+all, regardless of which record type was asked for. Closing this gap for
+real needs a Windows Firewall inbound rule allowing UDP 5353 for
+`node.exe` — a system-settings change, so this project doesn't make it
+itself; add it, then `npm start` should resolve `homeassistant.local` for
+real.
+
+**USB (`udev`), Zigbee (a coordinator), and 433MHz/IR (RC5/newKaku
+decoding) *native background-daemon* adapters remain out of scope
+entirely** — `static-adapter.js` still exists to pin down the plain
 adapter contract for whichever of those gets built next. WebUSB/WebHID
 above cover the browser-based path for USB and HID (including Bluetooth
 HID) specifically; a native, always-on USB adapter via `udev`/`node-usb`

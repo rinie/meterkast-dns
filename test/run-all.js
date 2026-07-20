@@ -14,3 +14,4 @@ import "./dirigera.test.js";
 import "./ecowitt.test.js";
 import "./smartbridge.test.js";
 import "./run-polling-adapter.test.js";
+import "./mdns.test.js";
