@@ -264,12 +264,23 @@ function mountDiscoverGrid(el, config) {
   el.append(button, gridEl);
 
   button.addEventListener("click", async () => {
+    // The CIDR input's placeholder ("192.168.1.0/24") is only a hint, not
+    // a real value -- clicking Scan without typing anything sends a blank
+    // cidr, which the server correctly rejects but with a message that
+    // reads like a bug report rather than "you forgot to type something."
+    // Caught here, before the request, so the failure is obvious and
+    // immediate rather than a round trip to learn the same thing.
+    if (cidrInputEl && !cidrInputEl.value.trim()) {
+      gridEl.textContent = "Enter a subnet first, e.g. 192.168.1.0/24.";
+      cidrInputEl.focus();
+      return;
+    }
     button.disabled = true;
     const originalLabel = button.textContent;
     button.textContent = "Scanning...";
     try {
       const endpoint = cidrInputEl
-        ? `${config.endpoint}?cidr=${encodeURIComponent(cidrInputEl.value)}`
+        ? `${config.endpoint}?cidr=${encodeURIComponent(cidrInputEl.value.trim())}`
         : config.endpoint;
       const res = await fetch(endpoint, { method: "POST" });
       const rows = await res.json();
