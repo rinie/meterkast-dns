@@ -37,6 +37,18 @@ body {
 .sidebar-entry:hover { background: #e4e4e4; }
 .sidebar-entry.active { background: #cfe4fb; font-weight: 600; }
 #main { flex: 1; padding: 1rem 1.5rem; max-width: 900px; box-sizing: border-box; }
+#top-links { margin-bottom: 1rem; }
+#top-links a {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.6rem;
+  margin: 0 0.5rem 0.5rem 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-decoration: none;
+  color: inherit;
+}
+#top-links a:hover { background: #e4e4e4; }
 
 /* Dense grid styling, ported from locuswms-web-frontend's app.css -- a
    bounded, sticky-header, single-line-per-row panel rather than a

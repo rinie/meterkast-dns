@@ -74,9 +74,9 @@ test/
     smartbridge-sync-response.json   # real response shape, IDs genericized
   run-all.js                     # see "Testing" below
 public/
-  index.html                     # GET / -- device table, live via SSE, links to web-scan/screens
+  index.html                     # GET /table -- classic device table, live via SSE
   web-scan.html                  # WebBLE/WebUSB/WebHID page -- see README.md
-  screens.html                   # GET /screens shell -- sidebar + content area
+  screens.html                   # GET /screens shell (also GET / -- see below) -- sidebar + content area
   screens.js                     # sidebar/router, markdown-it + observable-forms setup,
                                   # the ```datatable fence rule, row-select -> form population
   screens.css                    # sidebar/content layout + DataTables density (ported sizes)
@@ -196,12 +196,26 @@ backups/                         # dated snapshots, written automatically, gitig
   `navigator.bluetooth`/`navigator.usb`/`navigator.hid` calls and byte
   decoding happen, client-side, since none of those APIs exist in Node at
   all.
-- **One static-page handler for both pages** — `serveStaticPage` (in
+- **One static-page handler for every page** — `serveStaticPage` (in
   `src/core/server.js`) takes a filename and serves it from `public/`, used
-  for both `GET /` (`index.html`) and `GET /web-scan` (`web-scan.html`). A
-  second nearly identical function existed briefly when `web-scan.html` was
-  the only page; consolidated rather than copy-pasted once a second page
-  needed the exact same "read a file, serve as HTML" logic.
+  for `GET /table` (`index.html`), `GET /web-scan` (`web-scan.html`), and
+  `GET /screens`/`GET /screens/:slug` (`screens.html`). A second nearly
+  identical function existed briefly when `web-scan.html` was the only
+  page; consolidated rather than copy-pasted once a second page needed
+  the exact same "read a file, serve as HTML" logic.
+- **`GET /` is a real `302` redirect to `/screens`, not a served page** —
+  a real user report (`http://localhost:8420/` showing no sidebar) traced
+  back to the plain root having always served the older `index.html`
+  directly, which never had a sidebar at all; the fix people actually
+  wanted was the *default* landing on the screens app, not a rendering
+  bug in it. `index.html`'s live-SSE device table is a genuinely distinct
+  capability from any `/screens` page (it auto-refreshes on every
+  registry change with zero page interaction; the `/screens` pages load
+  a snapshot per navigation, live-updating only where a page's own
+  `` ```datatable `` config sets `"live": true`, as the Log screen does)
+  — moved to `/table` rather than removed, and cross-linked from both
+  `screens.html` (`#top-links`) and `index.html`'s own nav, so it's
+  relocated, not orphaned.
 - **Dirigera via plain `node:https`, no client library** — a polling loop,
   not an event stream: no documented real-time push mechanism, so
   `src/adapters/dirigera-adapter.js` calls `GET /v1/devices` on an interval (default
@@ -494,6 +508,21 @@ it**: the CDN URL was temporarily pointed at an unreachable host
 still rendered fully and immediately while only the content area
 correctly hung on "Loading..." — then reverted, and normal operation
 (real page content, live Log updates) re-confirmed working.
+
+**That CDN fix was real and worth keeping, but it wasn't what the user
+was actually hitting — a second report ("i still see no sidebar?") after
+that fix was already merged made the real cause specific: the user was
+navigating to the plain `http://localhost:8420/` root, which had always
+served `index.html`, a page that never had a sidebar at all.** Not a
+bug in the sidebar's own code — the sidebar was never on that page to
+begin with. Fixed at the routing layer, not the client: `GET /` now
+`302`s to `/screens`, making the screens app the actual default landing
+experience, with the old page relocated to `/table` rather than
+removed (see "Library choices" above). Verified live: a fresh browser
+tab hitting the bare root followed the redirect, landed on
+`/screens/resolved` with the sidebar rendering correctly, and `/table`
+still serves the classic live table with real data and working
+cross-links back to `/screens`.
 
 **The Log screen (`/screens/logs`) is verified live, not just on a
 static snapshot — including the SSE-append path, without needing a

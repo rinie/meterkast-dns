@@ -618,7 +618,10 @@ signal even without knowing what.
 
 Every adapter above answers "how does a *device* get resolved." This one
 is about the *browser* side: how a person actually looks at what the
-resolver knows, at `/screens`.
+resolver knows, at `/screens` — the default landing page (`GET /`
+redirects there). The original plain live-SSE device table still exists,
+just relocated to `/table`, for whoever wants that single always-live
+view without the sidebar/markdown-page layer.
 
 **The screens are hand-authored `.md` files, not generated.** `public/pages/*.md`
 map to `/screens/:slug` the same way

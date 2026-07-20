@@ -3,7 +3,8 @@
 // their live-resolved address), GET /logs (the backend's own recent
 // activity), GET /events (SSE -- "change" events for registry updates,
 // "log" events for new log entries, same connection), POST /devices/:name
-// (generic write path), the static pages (/, /web-scan, /screens), and a
+// (generic write path), the static pages (/screens, /web-scan, /table --
+// / redirects to /screens, the default landing experience), and a
 // generic static-file path for the screens app's own JS/CSS/vendored
 // plugin/handcoded markdown pages.
 import { createServer as createHttpServer } from "node:http";
@@ -163,7 +164,20 @@ export function createServer(registry) {
   return createHttpServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
 
+    // The screens app (sidebar + markdown pages) is the default landing
+    // experience -- a real redirect, not just a link, so a plain
+    // http://localhost:8420/ actually lands there instead of on the
+    // older, table-only index.html (real user report: reaching that
+    // plain root and asking "where's the sidebar" -- it was never on
+    // this page at all, only on /screens). The old live-SSE device table
+    // still exists, just at its own path now, not orphaned.
     if (req.method === "GET" && url.pathname === "/") {
+      res.writeHead(302, { location: "/screens" });
+      res.end();
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/table") {
       return serveStaticPage("index.html", req, res);
     }
 
