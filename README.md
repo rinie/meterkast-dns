@@ -673,6 +673,14 @@ pattern `web-scan.html` already established for BLE/USB/HID — no
 bundler, no build step, no npm package added to `package.json` for any
 of this.
 
+**The sidebar itself never waits on that CDN.** `markdown-it` is loaded
+lazily, on first actual page render, not as a static top-level `import`
+— a static import blocks a module's *entire* top-level code from running
+until it resolves, sidebar included, even though rendering a list of
+page links has nothing to do with markdown. A slow or unreachable CDN
+degrades to "the sidebar works, the page content doesn't load yet,"
+never to "nothing appears at all."
+
 **The Log screen (`/screens/logs`) is the same pattern, live.** The
 backend keeps a bounded, timestamped record of its own recent activity
 — `src/core/log.js`, a Domoticz/Home-Assistant-style rolling log, since

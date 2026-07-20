@@ -474,6 +474,27 @@ value as readable JSON text in the detail panel, and that sidebar
 navigation updates the URL via the History API without a full page
 reload.
 
+**A real bug, reported by the user, not found in testing: "I do not see
+the sidebar on startup."** Root cause was an ES module semantics
+gotcha, not a rendering bug — `screens.js` had `markdown-it` (a CDN
+import) as a *static* top-level `import`, and a module's static imports
+must ALL resolve before ANY of its top-level code runs, including
+`renderSidebar()`, which has nothing to do with markdown at all. A slow
+or blocked CDN fetch silently left the whole sidebar invisible with no
+error shown — plausible in this user's own environment specifically,
+given the real npm-registry and Windows-Firewall network quirks already
+documented elsewhere in this file. Fixed by loading `markdown-it` (and
+the vendored `markdown-it-form` plugin) lazily, on first actual page
+render, via `getMarkdownIt()`'s dynamic `import()` — `screens.js`'s only
+remaining static import is the local, same-origin `/grid.js`, so
+`renderSidebar()` now runs immediately regardless of CDN reachability.
+**Verified by directly reproducing the failure, not just reasoning about
+it**: the CDN URL was temporarily pointed at an unreachable host
+(`nonexistent-cdn-host-for-testing.invalid`), confirming the sidebar
+still rendered fully and immediately while only the content area
+correctly hung on "Loading..." — then reverted, and normal operation
+(real page content, live Log updates) re-confirmed working.
+
 **The Log screen (`/screens/logs`) is verified live, not just on a
 static snapshot — including the SSE-append path, without needing a
 synthetic trigger.** `handleLogs` and `log.js`'s own `log`/`listLogs`/
