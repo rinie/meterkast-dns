@@ -242,11 +242,17 @@ function startAddToPlaylist(row, cellEl) {
 // per-row-button pattern (grid.js's onAction) web-scan.html's
 // Connect/Read buttons already use.
 //
-// `cidrInput: true` (DNS's own subnet sweep, which has no sane
-// server-side default to fall back on the way Dirigera/Smartbridge's own
-// inventory calls do) renders a text input next to the Scan button and
-// appends its value as `?cidr=` on the endpoint -- every other transport
-// just omits this and scans with no query string at all.
+// `cidrInput: true` (DNS's own subnet sweep, which has no *universal*
+// default the way Dirigera/Smartbridge's own inventory calls do) renders
+// a text input next to the Scan button and appends its value as `?cidr=`
+// on the endpoint -- every other transport just omits this and scans
+// with no query string at all. `cidrDefaultEndpoint`, if set, is fetched
+// once to pre-fill that input with a real configured value (see
+// server.js's handleDnsDefaultCidr / METERKAST_DNS_CIDR) rather than
+// leaving only a placeholder hint -- a real LAN's own subnet doesn't
+// change scan to scan, so typing it every time is pure friction once it's
+// actually configured. No default set (or the fetch fails) just leaves
+// the placeholder as today; this is a convenience, never a requirement.
 function mountDiscoverGrid(el, config) {
   let cidrInputEl;
   if (config.cidrInput) {
@@ -255,6 +261,14 @@ function mountDiscoverGrid(el, config) {
     cidrInputEl.placeholder = config.cidrPlaceholder ?? "192.168.1.0/24";
     cidrInputEl.className = "add-to-playlist-name";
     el.append(cidrInputEl);
+    if (config.cidrDefaultEndpoint) {
+      fetch(config.cidrDefaultEndpoint)
+        .then((res) => res.json())
+        .then(({ cidr }) => {
+          if (cidr) cidrInputEl.value = cidr;
+        })
+        .catch(() => {}); // no configured default, or a transient failure -- the placeholder hint still works
+    }
   }
   const button = document.createElement("button");
   button.type = "button";

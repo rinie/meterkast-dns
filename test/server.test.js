@@ -15,6 +15,7 @@ import {
   handleList,
   handleGet,
   handleDiscover,
+  handleDnsDefaultCidr,
   handleAddToPlaylist,
 } from "../src/core/server.js";
 import { readPlaylist, writePlaylist } from "../src/core/playlist.js";
@@ -340,7 +341,7 @@ test("handleDiscover responds 502 when the discovery function itself fails (a re
   assert.deepEqual(JSON.parse(res.body), { error: "DIRIGERA_HOSTNAME is not set" });
 });
 
-test("handleDiscover forwards the request's own query params to the discover function -- DNS's cidr has no sane server-side default", async () => {
+test("handleDiscover forwards the request's own query params to the discover function -- DNS reads cidr from it", async () => {
   let receivedQuery;
   const discoverFns = {
     dns: async (query) => {
@@ -353,6 +354,20 @@ test("handleDiscover forwards the request's own query params to the discover fun
   await handleDiscover(discoverFns, "dns", new URLSearchParams("cidr=192.168.1.0/30"), {}, res);
 
   assert.equal(receivedQuery.get("cidr"), "192.168.1.0/30");
+});
+
+test("handleDnsDefaultCidr returns the configured default", () => {
+  const res = fakeResponse();
+  handleDnsDefaultCidr("192.168.1.0/24", {}, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body), { cidr: "192.168.1.0/24" });
+});
+
+test("handleDnsDefaultCidr returns null when no default is configured, not an error", () => {
+  const res = fakeResponse();
+  handleDnsDefaultCidr(undefined, {}, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body), { cidr: null });
 });
 
 test("handleAddToPlaylist writes a real entry to disk (backup + atomic write, same as any hand-edit) and upserts it into the live registry immediately", async () => {

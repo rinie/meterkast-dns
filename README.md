@@ -895,12 +895,25 @@ different: `scanSubnet` (in `dns-adapter.js`) reverse-PTR-queries every
 host address in a user-supplied CIDR (capped at `/22`..`/32` — 1024
 addresses at most, so a typo can't turn into a sweep of a much larger
 range), and `unclaimedDnsCandidates` filters out any hostname already
-claimed by a `transport: "dns"` entry. Unlike the hub transports, there's
-no sane server-side default for "which subnet" — the CIDR is a real input
-on `/screens/discover`'s own DNS panel, not guessed. Most addresses on a
-real LAN have no PTR record at all; that's the expected, normal outcome
-for most of a scan, not an error (same `ENOTFOUND`/`ENODATA` treatment
+claimed by a `transport: "dns"` entry. Most addresses on a real LAN have
+no PTR record at all; that's the expected, normal outcome for most of a
+scan, not an error (same `ENOTFOUND`/`ENODATA` treatment
 `resolveDnsHostname` already gives those two codes).
+
+Unlike the hub transports, there's no *universal* default for "which
+subnet" — but a real LAN's own subnet doesn't change from scan to scan,
+so an optional one lives in `.env` as `METERKAST_DNS_CIDR`, the same
+reasoning `DIRIGERA_HOSTNAME` already follows (real, instance-specific
+config, not a secret, shouldn't be hardcoded into a committed file
+either). The request's own `cidr` query param still wins when present —
+`/screens/discover`'s DNS panel pre-fills its input from
+`GET /discover/dns/default-cidr` if a default is configured, but stays
+editable for a one-off scan of somewhere else; no default configured (or
+the pre-fill fetch failing) just leaves the plain placeholder hint, same
+as before this existed. Clicking Scan with neither a typed value nor a
+configured default throws a clear message rather than guessing — caught
+client-side too now, before the request, after a real report of the
+error reading like a bug rather than "you forgot to type something."
 
 Bluetooth is the odd one out: Web Bluetooth has no server-side inventory
 to scan at all — its whole security model is a real user gesture picking

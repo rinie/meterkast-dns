@@ -980,6 +980,35 @@ button was clicked with that exact failure mode in mind, and it did not
 repeat: the click returned control immediately, no `computer` timeout,
 no forced-navigate recovery needed.
 
+**Two small follow-ups from real usage.** First, a genuine user-reported
+error: `ERROR: DNS discovery needs a "cidr" query param` — the CIDR
+input's placeholder text was only a hint, not a real value, so clicking
+Scan without typing anything sent a blank `cidr` and got back a message
+that read like a bug rather than "you forgot to type something."
+`mountDiscoverGrid` now checks for a blank input before firing the
+request at all, showing "Enter a subnet first" and focusing the field.
+Second, a genuinely useful follow-up question: "but I can store the dns
+range in my toml? ... this will not change at my home." `device-playlist.toml`
+was the wrong place for it (its schema is "one entry per physical
+device," and a subnet isn't a device) — `METERKAST_DNS_CIDR` in `.env`
+instead, the same reasoning `DIRIGERA_HOSTNAME` already follows (real,
+instance-specific config, not a secret, shouldn't be hardcoded into a
+committed file). `discover.dns` falls back to it when the request's own
+`cidr` is blank; a new `GET /discover/dns/default-cidr` lets the UI
+pre-fill the real value into the input (not just leave a placeholder) so
+clicking Scan needs zero typing once configured, while a one-off scan of
+a different subnet still just overwrites the field by hand.
+
+Verified live with the real value set (`METERKAST_DNS_CIDR=192.168.1.0/24`
+in the real `.env`): `GET /discover/dns/default-cidr` returned
+`{"cidr":"192.168.1.0/24"}`; on `/screens/discover`, the CIDR input's own
+`.value` (confirmed via the page's real DOM, not just the network
+response) was genuinely pre-filled with that string on load; clicking
+Scan Subnet with the field untouched returned the same real 33 candidates
+prior verification already established for this exact subnet — the whole
+zero-typing path works end to end, not just the individual pieces in
+isolation.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via

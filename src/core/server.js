@@ -164,8 +164,9 @@ export function handleReport(registry, name, req, res) {
 // only that a discovery function exists or it doesn't. `query` is the
 // request's own URLSearchParams, passed through untouched -- most
 // discover functions ignore it (Dirigera/Smartbridge need nothing beyond
-// their own credentials), DNS's subnet sweep reads `cidr` from it since
-// that has no sane server-side default.
+// their own credentials), DNS's subnet sweep reads `cidr` from it (falling
+// back to an optional METERKAST_DNS_CIDR default when omitted -- see
+// bin/meterkastd.js and handleDnsDefaultCidr below).
 export async function handleDiscover(discoverFns, transport, query, req, res) {
   const discoverFn = discoverFns[transport];
   if (!discoverFn) {
@@ -181,6 +182,17 @@ export async function handleDiscover(discoverFns, transport, query, req, res) {
     res.writeHead(502, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: error.message }));
   }
+}
+
+// GET /discover/dns/default-cidr -- lets /screens/discover's DNS panel
+// pre-fill its CIDR input with the real configured value (METERKAST_DNS_CIDR
+// in .env) rather than leaving a plain placeholder the user has to
+// remember to type every time. `null` when unset -- the panel falls back
+// to its own placeholder hint, same as today, not an error: a default is
+// optional, a one-off scan of a different subnet is still typed by hand.
+export function handleDnsDefaultCidr(dnsDefaultCidr, req, res) {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ cidr: dnsDefaultCidr ?? null }));
 }
 
 // POST /playlist/devices -- claims a discovered candidate under a real
@@ -274,7 +286,7 @@ export async function serveStaticFile(relativePath, req, res) {
   }
 }
 
-export function createServer(registry, displayFields = {}, { playlistPath, discover = {} } = {}) {
+export function createServer(registry, displayFields = {}, { playlistPath, discover = {}, dnsDefaultCidr } = {}) {
   return createHttpServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
 
@@ -313,6 +325,10 @@ export function createServer(registry, displayFields = {}, { playlistPath, disco
 
     if (req.method === "GET" && url.pathname === "/web-scan") {
       return serveStaticPage("web-scan.html", req, res);
+    }
+
+    if (req.method === "GET" && url.pathname === "/discover/dns/default-cidr") {
+      return handleDnsDefaultCidr(dnsDefaultCidr, req, res);
     }
 
     const discoverMatch = url.pathname.match(/^\/discover\/([^/]+)$/);
