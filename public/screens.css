@@ -91,6 +91,19 @@ body {
 
 .datatable-error { color: #a00; }
 
+/* A selected row's curated display-fields.toml lines (see screens.js's
+   populateDisplayFields) -- a few larger, console-like readouts above
+   the detail form's raw field grid, not another dense table row. */
+#display-fields:empty { display: none; }
+#display-fields {
+  margin: 0.5rem 0 1rem;
+  padding: 0.5rem 0.75rem;
+  background: #f5f8fc;
+  border: 1px solid #cfe4fb;
+  border-radius: 4px;
+}
+.display-field-line { font-size: 14px; line-height: 1.6; }
+
 /* Level-based row coloring for the Log screen (grid.js's rowClassKey ->
    row-${level}), the same at-a-glance error/warn distinction
    Domoticz/Home Assistant's own log views use. */

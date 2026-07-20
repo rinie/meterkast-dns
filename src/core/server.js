@@ -13,20 +13,32 @@ import { join, dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listRecords, getRecord, upsertRecord, subscribe } from "./registry.js";
 import { listLogs, subscribeLogs } from "./log.js";
+import { flattenDisplayFields } from "./display-fields.js";
 
-export function handleList(registry, req, res) {
-  res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify(listRecords(registry)));
+// `display` adds a few curated, formatted lines (display-fields.toml,
+// keyed by transport) alongside a record's raw `meta` -- never replaces
+// it, since not every transport has a mapping defined. Absent/empty
+// `displayFields` (no display-fields.toml, or nothing configured for
+// this transport) is exactly what flattenDisplayFields already treats
+// as "no lines," so this never has to special-case that itself.
+function withDisplay(record, displayFields) {
+  return { ...record, display: flattenDisplayFields(displayFields[record.transport], record.meta) };
 }
 
-export function handleGet(registry, name, req, res) {
+export function handleList(registry, displayFields, req, res) {
+  const records = listRecords(registry).map((record) => withDisplay(record, displayFields));
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify(records));
+}
+
+export function handleGet(registry, displayFields, name, req, res) {
   const record = getRecord(registry, name);
   if (!record) {
     res.writeHead(404).end();
     return;
   }
   res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify(record));
+  res.end(JSON.stringify(withDisplay(record, displayFields)));
 }
 
 // GET /resolved -- the subset of GET /devices that answers "what did the
@@ -160,7 +172,7 @@ export async function serveStaticFile(relativePath, req, res) {
   }
 }
 
-export function createServer(registry) {
+export function createServer(registry, displayFields = {}) {
   return createHttpServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
 
@@ -182,7 +194,7 @@ export function createServer(registry) {
     }
 
     if (req.method === "GET" && url.pathname === "/devices") {
-      return handleList(registry, req, res);
+      return handleList(registry, displayFields, req, res);
     }
 
     if (req.method === "GET" && url.pathname === "/resolved") {
@@ -220,7 +232,7 @@ export function createServer(registry) {
 
     const deviceMatch = url.pathname.match(/^\/devices\/([^/]+)$/);
     if (req.method === "GET" && deviceMatch) {
-      return handleGet(registry, decodeURIComponent(deviceMatch[1]), req, res);
+      return handleGet(registry, displayFields, decodeURIComponent(deviceMatch[1]), req, res);
     }
     if (req.method === "POST" && deviceMatch) {
       return handleReport(registry, decodeURIComponent(deviceMatch[1]), req, res);

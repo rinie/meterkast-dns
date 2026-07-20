@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createRegistry, upsertRecord } from "../src/core/registry.js";
 import { readPlaylist, flattenDeviceReadings } from "../src/core/playlist.js";
+import { loadDisplayFields } from "../src/core/display-fields.js";
 import { createServer } from "../src/core/server.js";
 import { runPollingAdapter } from "../src/core/run-polling-adapter.js";
 import dirigeraAdapter from "../src/adapters/dirigera-adapter.js";
@@ -12,8 +13,11 @@ import { log } from "../src/core/log.js";
 
 const playlistPath =
   process.env.METERKAST_PLAYLIST ?? new URL("../device-playlist.toml", import.meta.url);
+const displayFieldsPath =
+  process.env.METERKAST_DISPLAY_FIELDS ?? new URL("../display-fields.toml", import.meta.url);
 
 const registry = createRegistry();
+const displayFields = await loadDisplayFields(displayFieldsPath);
 
 const playlist = await readPlaylist(playlistPath).catch((error) => {
   if (error.code === "ENOENT") {
@@ -48,7 +52,7 @@ for (const [transport, label, adapterFn] of pollingAdapters) {
   });
 }
 
-const server = createServer(registry);
+const server = createServer(registry, displayFields);
 const port = Number(process.env.PORT ?? 8420);
 server.listen(port, () => {
   log("info", `meterkast-dns listening on http://localhost:${port}`);

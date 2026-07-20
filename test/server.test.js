@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createRegistry, getRecord, upsertRecord } from "../src/core/registry.js";
-import { handleReport, serveStaticPage, serveStaticFile, handleResolved, summarizeResolution, handleLogs } from "../src/core/server.js";
+import { handleReport, serveStaticPage, serveStaticFile, handleResolved, summarizeResolution, handleLogs, handleList, handleGet } from "../src/core/server.js";
 import { log } from "../src/core/log.js";
 
 function fakeRequestWithBody(bodyString) {
@@ -168,4 +168,43 @@ test("handleLogs returns recent log entries as JSON, including one just logged",
   assert.equal(res.statusCode, 200);
   const logs = JSON.parse(res.body);
   assert.ok(logs.some((entry) => entry.message === "handleLogs test unique message" && entry.level === "info"));
+});
+
+test("handleList adds curated display lines per record's own transport, empty for a transport with no mapping", () => {
+  const registry = createRegistry();
+  upsertRecord(registry, "weather-station", {
+    transport: "ecowitt",
+    address: "AA:BB",
+    meta: { indoor: { temperature: { value: "23.5", unit: "℃" } } },
+  });
+  upsertRecord(registry, "kitchen-lamp", { transport: "dirigera", address: "dev-1", meta: { isOn: true } });
+  const displayFields = {
+    ecowitt: [{ label: "Indoor Temperature", valuePath: "indoor.temperature.value", unitPath: "indoor.temperature.unit" }],
+  };
+
+  const res = fakeResponse();
+  handleList(registry, displayFields, {}, res);
+
+  const records = JSON.parse(res.body);
+  const weatherStation = records.find((r) => r.name === "weather-station");
+  const kitchenLamp = records.find((r) => r.name === "kitchen-lamp");
+  assert.deepEqual(weatherStation.display, [{ label: "Indoor Temperature", display: "23,5 ℃" }]);
+  assert.deepEqual(kitchenLamp.display, []);
+});
+
+test("handleGet includes the same curated display lines for a single record", () => {
+  const registry = createRegistry();
+  upsertRecord(registry, "weather-station", {
+    transport: "ecowitt",
+    address: "AA:BB",
+    meta: { indoor: { temperature: { value: "23.5", unit: "℃" } } },
+  });
+  const displayFields = {
+    ecowitt: [{ label: "Indoor Temperature", valuePath: "indoor.temperature.value", unitPath: "indoor.temperature.unit" }],
+  };
+
+  const res = fakeResponse();
+  handleGet(registry, displayFields, "weather-station", {}, res);
+
+  assert.deepEqual(JSON.parse(res.body).display, [{ label: "Indoor Temperature", display: "23,5 ℃" }]);
 });

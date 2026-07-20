@@ -708,7 +708,40 @@ as it happens, no page reload. `rowClassKey: "level"` colors each row by
 severity (error/warn/info/debug), the same at-a-glance distinction those
 other dashboards' log views use.
 
-### What already exists and should be reused, not reinvented
+### Flattening nested readings for display
+
+A raw reading is rarely flat — Ecowitt's `real_time` response nests
+temperature three levels deep (`outdoor.temperature.{value,unit}`), and
+`GET /devices/:name`'s own `meta` shows that whole structure verbatim,
+correctly but unreadably. The fix is the same shape as `GET /resolved`'s
+`summarizeResolution` (normalize a differing shape into one clean field),
+generalized into a hand-editable mapping instead of hardcoded per
+transport: `display-fields.toml`.
+
+```toml
+[[displayFields.ecowitt]]
+label     = "Indoor Temperature"
+valuePath = "indoor.temperature.value"
+unitPath  = "indoor.temperature.unit"
+```
+
+A **few** curated lines, deliberately — mirroring a device's own physical
+console (an Ecowitt indoor unit's main screen shows exactly Indoor/
+Outdoor Temperature and Humidity, not every field its API returns), not
+an attempt to flatten the whole `meta` tree generically. `valuePath`/
+`unitPath` are dot-paths into a device's own `meta`; a path that doesn't
+resolve for a given reading is skipped rather than shown blank, same
+"only show what's real" reasoning as `/resolved` leaving out a
+never-resolved entry entirely. Numbers are formatted with a comma decimal
+separator (`23,7`, not `23.7`) — the API's own value strings are US-style
+regardless of which unit was requested, formatted here to match how the
+number is actually read, not re-transmitted as-is.
+
+Committed, not gitignored, unlike `device-playlist.toml`: a path into a
+transport's own known response shape isn't personal network topology,
+it's a sensible default for anyone using the same integration. `/screens/devices`'
+detail panel renders these lines above the raw `meta`, never instead of
+it — the full reading is always one click away.
 
 This is a composition problem more than an invention problem — most of the
 pieces already exist somewhere, just not connected:

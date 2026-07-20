@@ -1,0 +1,31 @@
+# Curated flat display fields per transport -- a few lines mirroring a
+# device's own physical console (Ecowitt's indoor unit shows Indoor/
+# Outdoor Temperature/Humidity as its main screen), not every field the
+# API happens to return. Committed, not gitignored: unlike
+# device-playlist.toml (real network topology), this only names paths
+# into a transport's own known response shape -- nothing personal, and a
+# sensible default for anyone with the same integration. See README.md
+# "Flattening nested readings for display".
+#
+# valuePath/unitPath are dot-paths into a device's own `meta` object.
+# unitPath is optional -- omit it for a field whose value needs no unit
+# suffix.
+[[displayFields.ecowitt]]
+label     = "Indoor Temperature"
+valuePath = "indoor.temperature.value"
+unitPath  = "indoor.temperature.unit"
+
+[[displayFields.ecowitt]]
+label     = "Indoor Humidity"
+valuePath = "indoor.humidity.value"
+unitPath  = "indoor.humidity.unit"
+
+[[displayFields.ecowitt]]
+label     = "Outdoor Temperature"
+valuePath = "outdoor.temperature.value"
+unitPath  = "outdoor.temperature.unit"
+
+[[displayFields.ecowitt]]
+label     = "Outdoor Humidity"
+valuePath = "outdoor.humidity.value"
+unitPath  = "outdoor.humidity.unit"
