@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
+import dirigeraAdapter, {
   parseDirigeraResponse,
   matchConfiguredDevices,
   fetchDirigeraDevices,
@@ -105,5 +105,34 @@ test("fetchDirigeraDevices rejects on a non-200 response from the server", async
     );
   } finally {
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// Real bug, hit in production: a transient network error on this bulk
+// fetch used to escape the generator entirely and kill the adapter
+// permanently. fetchDevices is injectable specifically so this retry
+// behavior is directly testable without a real network round trip --
+// same dependency-injection shape as the dns adapter's own `resolver`.
+test("dirigeraAdapter survives a failed poll cycle and yields on the next successful one", async () => {
+  process.env.DIRIGERA_HOSTNAME = "test-hub.local";
+  process.env.DIRIGERA_BEARER_TOKEN = "test-token";
+  let callCount = 0;
+  const fetchDevices = async () => {
+    callCount += 1;
+    if (callCount === 1) throw Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+    return [{ id: "dev-1", attributes: { isOn: true } }];
+  };
+  const records = { "kitchen-lamp": { transport: "dirigera", address: "dev-1" } };
+  const generator = dirigeraAdapter(records, { intervalMs: 5, fetchDevices });
+
+  try {
+    const { value, done } = await generator.next();
+    assert.equal(done, false);
+    assert.deepEqual(value, { name: "kitchen-lamp", transport: "dirigera", address: "dev-1", meta: { isOn: true } });
+    assert.equal(callCount, 2); // first cycle failed and was caught; this yield came from the second
+  } finally {
+    await generator.return();
+    delete process.env.DIRIGERA_HOSTNAME;
+    delete process.env.DIRIGERA_BEARER_TOKEN;
   }
 });

@@ -4,6 +4,7 @@
 // production API.
 import https from "node:https";
 import { resolveSecretEnv } from "../core/secrets.js";
+import { log } from "../core/log.js";
 
 export function parseSmartbridgeResponse(statusCode, body) {
   if (statusCode !== 200) {
@@ -80,7 +81,16 @@ export function matchConfiguredDevices(smartbridgeDevices, configuredRecords) {
 // One bulk "sync" call covers every device on the account, same shape as
 // Dirigera -- a poll cycle is a single fetch, matched against configured
 // playlist entries by the ICS2000 device id.
-export default async function* smartbridgeAdapter(records, { intervalMs = 60000 } = {}) {
+//
+// A cycle's fetch is caught and logged rather than left to escape the
+// generator -- a real bug hit in production, not in testing: a transient
+// network error (ECONNRESET) on this single bulk call used to kill the
+// whole adapter permanently (bin/meterkastd.js's own
+// runPollingAdapter(...).catch() only logs once, it never restarts the
+// loop), unlike Ecowitt/mDNS/DNS, which already caught per-device
+// failures inside their own loops from the start. One bad cycle now just
+// waits for the next one, the same resilience those adapters already had.
+export default async function* smartbridgeAdapter(records, { intervalMs = 60000, fetchDevices = fetchSmartbridgeDevices } = {}) {
   const hasSmartbridgeDevices = Object.values(records).some((record) => record.transport === "smartbridge");
   if (!hasSmartbridgeDevices) return;
 
@@ -89,9 +99,13 @@ export default async function* smartbridgeAdapter(records, { intervalMs = 60000 
   const passwordHash = resolveSecretEnv("SMARTBRIDGE_PASSWORD_HASH");
 
   while (true) {
-    const devices = await fetchSmartbridgeDevices({ hostname: "trustsmartcloud2.com", email, mac, passwordHash });
-    for (const match of matchConfiguredDevices(devices, records)) {
-      yield match;
+    try {
+      const devices = await fetchDevices({ hostname: "trustsmartcloud2.com", email, mac, passwordHash });
+      for (const match of matchConfiguredDevices(devices, records)) {
+        yield match;
+      }
+    } catch (error) {
+      log("warn", `Smartbridge poll failed: ${error.message}`);
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }

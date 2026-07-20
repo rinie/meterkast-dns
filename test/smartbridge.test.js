@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
+import smartbridgeAdapter, {
   parseSmartbridgeResponse,
   fetchSmartbridgeDevices,
   matchConfiguredDevices,
@@ -89,5 +89,36 @@ test("fetchSmartbridgeDevices performs a real HTTPS request and returns the devi
     assert.match(receivedPath, /password_hash=p%40ssword/); // @ must be percent-encoded
   } finally {
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// Real bug, hit in production (the exact "read ECONNRESET" case): a
+// transient network error on this bulk fetch used to escape the
+// generator entirely and kill the adapter permanently. fetchDevices is
+// injectable specifically so this retry behavior is directly testable
+// without a real network round trip.
+test("smartbridgeAdapter survives a failed poll cycle and yields on the next successful one", async () => {
+  process.env.SMARTBRIDGE_EMAIL = "test@example.com";
+  process.env.SMARTBRIDGE_MAC = "AA:BB";
+  process.env.SMARTBRIDGE_PASSWORD_HASH = "test-hash";
+  let callCount = 0;
+  const fetchDevices = async () => {
+    callCount += 1;
+    if (callCount === 1) throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+    return [{ id: "222222", version_status: "0", version_data: "1", time_added: "2025-01-01", data: "x", status: "y" }];
+  };
+  const records = { "kaku-plug": { transport: "smartbridge", address: "222222" } };
+  const generator = smartbridgeAdapter(records, { intervalMs: 5, fetchDevices });
+
+  try {
+    const { value, done } = await generator.next();
+    assert.equal(done, false);
+    assert.equal(value.name, "kaku-plug");
+    assert.equal(callCount, 2); // first cycle failed and was caught; this yield came from the second
+  } finally {
+    await generator.return();
+    delete process.env.SMARTBRIDGE_EMAIL;
+    delete process.env.SMARTBRIDGE_MAC;
+    delete process.env.SMARTBRIDGE_PASSWORD_HASH;
   }
 });
