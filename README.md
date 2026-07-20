@@ -118,6 +118,14 @@ separate question — see IMPLEMENTATION.md):
   NEC) into `{protocol, address, command}` and stores the address once
   instead of repeating it per button; genuinely undecodable remotes fall back
   to LIRC-style raw pulse capture. See "Extending to 433MHz/IR remotes" below.
+- **DNS adapter** — resolves a router-assigned local hostname
+  (`raspi3.home`) via regular unicast DNS, not mDNS: most home routers run a
+  combined DHCP+DNS server (dnsmasq being the common case) that already
+  answers exactly this query, using whatever domain suffix the router
+  picked rather than the reserved `.local`. Same shape as the MQTT/mDNS
+  adapter above — nothing new to stand up, just a client for a resolver the
+  network already runs. See "Extending to router-assigned local DNS names"
+  below.
 
 Splitting the system this way mirrors the Language Server Protocol / VS Code
 extension-process model: a narrow, stable core interface, with all the
@@ -480,6 +488,36 @@ click. But HID report *bytes* are exactly as unstandardized as raw USB's
 report descriptor, which varies device to device), so they're reported the
 same way: hex, keyed by `reportId`, the same honest fallback rather than a
 guessed decoding.
+
+### Extending to router-assigned local DNS names
+
+Not every "the router already knows this" case is mDNS. A device with a
+DHCP-fixed or DHCP-leased address (`raspi3` at `192.168.1.53`, say) is
+usually also reachable as `raspi3.home` (or `.lan`, or whatever domain
+suffix the router picked) — but that name isn't resolved by multicast the
+way a `.local` name is. It's answered by regular, one-to-one unicast DNS,
+sent straight to the DNS server the OS is already configured to use, which
+on a typical home LAN is the router itself: most consumer and prosumer
+routers run a combined DHCP+DNS server (dnsmasq being the common case
+underneath OpenWrt, most ISP routers, and plenty of others) that already
+answers exactly this query using its own DHCP lease table. Nothing new to
+stand up — the router is already the resolver, the same shape as DNS
+itself in §1, just scoped to the LAN instead of the internet.
+
+```toml
+raspi3.transport = "dns"
+raspi3.address   = "raspi3.home"
+```
+
+Deliberately a separate `dns` transport from `mdns` above, not a variant of
+it, because the mechanism genuinely differs: one multicast query with no
+fixed destination versus one unicast query sent to a specific, known
+server. `.local` is reserved for mDNS by [RFC 6762](https://www.rfc-editor.org/rfc/rfc6762);
+`.home`/`.lan`/whatever a router uses is a convention, not a reservation,
+and only resolves at all because that specific router chooses to answer
+it. Node's built-in `dns` module handles this natively — no new dependency
+the way `multicast-dns` was needed for the mDNS adapter, since regular
+unicast DNS is exactly what `dns.resolve4`/`resolve6` already speak.
 
 ### Extending to vendor-hub REST APIs (Dirigera, and Matter by proxy)
 

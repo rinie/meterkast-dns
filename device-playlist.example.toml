@@ -18,6 +18,13 @@ mqtt-broker.transport     = "mdns"
 mqtt-broker.address       = "_mqtt._tcp.local"
 mqtt-broker.password_env  = "MQTT_BROKER_PASSWORD"
 
+# Router-assigned via DHCP+DNS (dnsmasq-style), not mDNS -- regular
+# unicast DNS to whatever server this machine already uses, normally the
+# router itself. See README.md "Extending to router-assigned local DNS
+# names".
+raspi3.transport = "dns"
+raspi3.address   = "raspi3.home"
+
 # Dirigera hub connection config (hostname, bearer token) lives in .env --
 # DIRIGERA_HOSTNAME, DIRIGERA_BEARER_TOKEN -- not here. See README.md
 # "Extending to vendor-hub REST APIs".
