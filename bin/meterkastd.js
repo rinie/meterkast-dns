@@ -7,6 +7,7 @@ import dirigeraAdapter from "../src/adapters/dirigera-adapter.js";
 import ecowittAdapter from "../src/adapters/ecowitt-adapter.js";
 import smartbridgeAdapter from "../src/adapters/smartbridge-adapter.js";
 import mdnsAdapter from "../src/adapters/mdns-adapter.js";
+import dnsAdapter from "../src/adapters/dns-adapter.js";
 
 const playlistPath =
   process.env.METERKAST_PLAYLIST ?? new URL("../device-playlist.toml", import.meta.url);
@@ -37,6 +38,7 @@ const pollingAdapters = [
   ["ecowitt", "Ecowitt", ecowittAdapter],
   ["smartbridge", "Smartbridge", smartbridgeAdapter],
   ["mdns", "mDNS", mdnsAdapter],
+  ["dns", "DNS", dnsAdapter],
 ];
 for (const [transport, label, adapterFn] of pollingAdapters) {
   runPollingAdapter(registry, transport, adapterFn).catch((error) => {

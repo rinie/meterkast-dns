@@ -47,6 +47,7 @@ src/
     ecowitt-adapter.js           # fetch + parse + polling loop, all of it
     smartbridge-adapter.js       # fetch + parse + match + polling loop, all of it
     mdns-adapter.js              # PTR/SRV/A/TXT resolution + polling loop, all of it
+    dns-adapter.js                # unicast A/AAAA resolution + polling loop, all of it
 bin/
   meterkastd.js                  # entrypoint: loads the playlist, starts the server
   sync-backups.js                 # cron-friendly: pushes backups/ offsite
@@ -62,6 +63,7 @@ test/
   ecowitt.test.js
   smartbridge.test.js
   mdns.test.js
+  dns-adapter.test.js
   run-polling-adapter.test.js
   fixtures/
     test-cert.pem                    # throwaway self-signed cert for HTTPS tests
@@ -146,6 +148,15 @@ backups/                         # dated snapshots, written automatically, gitig
   client (`mqtt`) was deliberately out of scope, since the motivating
   problem this project set out to fix is specifically the broker's
   *address* being hardcoded, not building a general MQTT pub/sub bridge.
+- **The DNS adapter needs no dependency at all** — router-assigned local
+  hostnames are regular unicast DNS, which Node's built-in `node:dns`
+  module already speaks natively (`resolve4`/`resolve6`, and the
+  `Resolver` class for pointing at a specific server, used by the tests to
+  target a real local fake DNS server instead of the network). `dns-packet`
+  — already present transitively via `multicast-dns` — was promoted to an
+  explicit `devDependency` since `test/dns-adapter.test.js` imports it
+  directly to build that fake server; it was never an implicit/phantom
+  import.
 - **WebBLE/WebUSB/WebHID — the only BLE/USB/HID path now** — `handleReport`
   (in `src/core/server.js`) adds a generic `POST /devices/:name`,
   deliberately transport-agnostic (it stores whatever record it's given, no
@@ -340,6 +351,28 @@ real needs a Windows Firewall inbound rule allowing UDP 5353 for
 `node.exe` — a system-settings change, so this project doesn't make it
 itself; add it, then `npm start` should resolve `homeassistant.local` for
 real.
+
+**The DNS adapter (`transport = "dns"`) is verified end to end against a
+real router, not just a local mock — the strongest tier available, closing
+the exact gap the mDNS adapter hit.** `resolveDnsHostname` is tested
+against a real local unicast DNS server (`test/dns-adapter.test.js`,
+built on `dgram` + `dns-packet`, the same "real local infrastructure"
+pattern as the mDNS tests) covering the A, AAAA-fallback, and
+neither-record-exists paths. Then, for real: this machine's own configured
+DNS server was confirmed (`Get-DnsClientServerAddress`) to be the router
+itself (`192.168.1.1`), a direct `dns.resolve4('raspi3.home')` against it
+returned a real, live answer (`192.168.1.53`) with no firewall issue at
+all — regular unicast DNS isn't affected by the per-app inbound-rule gap
+that blocks mDNS, since it's fundamental traffic every internet connection
+already depends on. `bin/meterkastd.js` was then run for real with a
+`raspi3.transport = "dns"` / `raspi3.address = "raspi3.home"` entry in the
+real playlist: `GET /devices/raspi3` came back with
+`{"resolvedAddress": "192.168.1.53", "family": "A"}`, alongside Dirigera,
+Ecowitt, and Smartbridge still serving real data and the (still-blocked,
+as expected) mDNS entries failing gracefully next to all of it. Unlike
+every other adapter in this document, there is no remaining verification
+gap to hand off here — this one is real, tested, and confirmed against
+production infrastructure in the same session it was built.
 
 **USB (`udev`), Zigbee (a coordinator), and 433MHz/IR (RC5/newKaku
 decoding) *native background-daemon* adapters remain out of scope
