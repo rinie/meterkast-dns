@@ -43,6 +43,7 @@
   .datatable-grid tbody tr:hover { background: #f5f8fc; }
   .datatable-grid .dt-layout-row { margin: 0.3rem 0; font-size: 11px; }
   .datatable-grid .dt-search input, .datatable-grid .dt-length select { font-size: 11px; padding: 0.15rem 0.3rem; }
+  .add-to-playlist-name { font-size: 0.9rem; padding: 0.2rem 0.4rem; width: 10rem; }
 </style>
 </head>
 <body>
@@ -56,6 +57,24 @@
 
 <h2>Bluetooth (GATT)</h2>
 <div id="ble-targets">Loading playlist...</div>
+
+<h2>Discover an unknown Bluetooth device</h2>
+<p>
+  Web Bluetooth has no way to list multiple nearby devices at once the way
+  a native scanner can -- <code>requestDevice({acceptAllDevices: true})</code>
+  is the standards-track, no-flag path: one real device per click, via the
+  browser's own picker, not a live scanning list (the alternative,
+  <code>requestLEScan()</code>, is a non-standard Chrome API gated behind
+  an experimental flag). Click Scan, pick a device in the dialog that
+  opens, and it's added to the list below. "Add to playlist" writes it
+  into <code>device-playlist.toml</code> with no known
+  <code>service</code>/<code>characteristic</code> yet -- add those by
+  hand afterward if you want GATT reads, the same as any other Bluetooth
+  playlist entry.
+</p>
+<button type="button" id="ble-scan-button" class="scan-action">Scan for a device</button>
+<span id="ble-scan-status" class="scan-status"></span>
+<div id="ble-discovered"></div>
 
 <h2>USB</h2>
 <p>
@@ -295,7 +314,145 @@ function renderTargetsGrid(containerEl, targets, emptyMessage, actionLabel, conn
   });
 }
 
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Web Bluetooth deliberately never exposes a device's real BD_ADDR (MAC)
+// to page JS -- device.id is an opaque, origin-scoped identifier instead,
+// stable for this browser profile but not a real Gutenberg address the
+// way the native noble adapter's MAC is. This project already treats
+// device.id as the address for playlist purposes (see
+// connectAndReadBle's own `address: device.id` above); worth restating
+// here specifically because this is the first place device.id becomes
+// the *sole* identifier for a brand-new playlist entry, not just a
+// reading against a device a human already named and configured.
+function suggestedBleName(device) {
+  return device.name ? slugify(device.name) : `ble-${device.id.slice(0, 8)}`;
+}
+
+// Renders the same inline "claim a candidate" mini-form
+// /screens/discover's own startAddToPlaylist uses -- duplicated rather
+// than imported, since this page has always been fully self-contained
+// (see the stylesheet comment at the top of this file); keep the two in
+// sync by hand if either changes meaningfully.
+function startAddToPlaylist(row, cellEl) {
+  cellEl.innerHTML = "";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = row.suggestedName ?? "";
+  input.className = "add-to-playlist-name";
+  const saveButton = document.createElement("button");
+  saveButton.type = "button";
+  saveButton.textContent = "Save";
+  saveButton.className = "scan-action";
+  const cancelButton = document.createElement("button");
+  cancelButton.type = "button";
+  cancelButton.textContent = "Cancel";
+  cancelButton.className = "scan-action";
+  const statusEl = document.createElement("span");
+  statusEl.className = "scan-status";
+  cellEl.append(input, saveButton, cancelButton, statusEl);
+  input.focus();
+  input.select();
+
+  const revertToButton = () => {
+    cellEl.innerHTML =
+      '<button type="button" data-action="add" class="scan-action">Add to playlist</button><span class="scan-status"></span>';
+  };
+  cancelButton.addEventListener("click", revertToButton);
+
+  const submit = async () => {
+    const name = input.value.trim();
+    if (!name) {
+      statusEl.textContent = "name required";
+      return;
+    }
+    input.disabled = true;
+    saveButton.disabled = true;
+    const res = await fetch("/playlist/devices", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, transport: row.transport, address: row.address }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      statusEl.textContent = `ERROR: ${json.error}${json.suggestedName ? ` (try "${json.suggestedName}")` : ""}`;
+      input.disabled = false;
+      saveButton.disabled = false;
+      return;
+    }
+    cellEl.textContent = "Added -- restart meterkastd to start polling this device.";
+  };
+  const submitAndReportErrors = () => submit().catch((error) => { statusEl.textContent = `ERROR: ${error.message}`; });
+  saveButton.addEventListener("click", submitAndReportErrors);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submitAndReportErrors();
+  });
+}
+
+// Client-side only -- unlike the Discover Devices backend scans
+// (Dirigera/Smartbridge/DNS all fetch a hub/cloud's own full inventory
+// server-side), a BLE picker result only ever exists in this page's own
+// memory; there's no server-side "unclaimed BLE devices" list to fetch,
+// since Web Bluetooth's whole security model is built around a real user
+// gesture picking one specific device, not a server enumerating what's
+// nearby. `discovered` accumulates across multiple Scan clicks in this
+// one page session (each requestDevice() call only ever returns one
+// device), deduplicated by address so re-picking the same real device
+// twice doesn't add a second row.
+function renderDiscoveredGrid(containerEl, discovered) {
+  createGrid(containerEl, discovered, {
+    columns: [
+      { key: "suggestedName", label: "Suggested Name" },
+      { key: "address", label: "Address" },
+      {
+        key: null,
+        label: "",
+        render: () => `<button type="button" data-action="add" class="scan-action">Add to playlist</button><span class="scan-status"></span>`,
+      },
+    ],
+    onAction: (row, action, el) => {
+      if (action !== "add") return;
+      startAddToPlaylist(row, el.closest("td"));
+    },
+  });
+}
+
+function setupBleScan() {
+  const scanButton = document.getElementById("ble-scan-button");
+  const statusEl = document.getElementById("ble-scan-status");
+  const gridEl = document.getElementById("ble-discovered");
+  if (!navigator.bluetooth) {
+    scanButton.disabled = true;
+    statusEl.textContent = "Web Bluetooth is not available in this browser.";
+    return;
+  }
+
+  const discovered = [];
+  scanButton.addEventListener("click", async () => {
+    statusEl.textContent = "requesting device...";
+    try {
+      const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+      if (!discovered.some((candidate) => candidate.address === device.id)) {
+        discovered.push({ transport: "bluetooth", address: device.id, suggestedName: suggestedBleName(device) });
+      }
+      statusEl.textContent = "";
+      renderDiscoveredGrid(gridEl, discovered);
+    } catch (error) {
+      // A real, ordinary outcome, not a bug: the user closed the picker
+      // without choosing a device (Chrome throws NotFoundError for this).
+      statusEl.textContent = error.name === "NotFoundError" ? "cancelled" : `ERROR: ${error.name} - ${error.message}`;
+    }
+  });
+}
+
 async function main() {
+  setupBleScan();
+
   const bleTargetsEl = document.getElementById("ble-targets");
   const usbTargetsEl = document.getElementById("usb-targets");
   const hidTargetsEl = document.getElementById("hid-targets");
