@@ -29,8 +29,11 @@ A reverse-PTR sweep of your own local subnet -- plain DNS has no
 actually has. Enter your LAN's subnet (e.g. `192.168.1.0/24`); capped at
 `/22` (1024 addresses) so a typo can't accidentally sweep something much
 larger. Most addresses have no PTR record at all -- that's the normal,
-expected outcome for most of a subnet, not an error.
+expected outcome for most of a subnet, not an error. Set
+`METERKAST_DNS_CIDR` in `.env` to pre-fill this with your real subnet
+(it doesn't change scan to scan) -- still editable for a one-off scan of
+somewhere else.
 
 ```datatable
-{"discover": true, "endpoint": "/discover/dns", "buttonLabel": "Scan Subnet", "cidrInput": true, "columns": ["suggestedName", "address"]}
+{"discover": true, "endpoint": "/discover/dns", "buttonLabel": "Scan Subnet", "cidrInput": true, "cidrDefaultEndpoint": "/discover/dns/default-cidr", "columns": ["suggestedName", "address"]}
 ```

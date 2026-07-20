@@ -59,16 +59,20 @@ for (const [transport, label, adapterFn] of pollingAdapters) {
 // resolved here, the same place each polling adapter above resolves them.
 // Dirigera/Smartbridge are wired up because they already fetch their full
 // inventory in one bulk call, so "who's unclaimed" costs nothing extra.
-// DNS is wired up too, but needs a `cidr` query param -- unlike a hub's
-// own inventory call, there's no sane server-side default for "which
-// subnet", so a missing one throws a clear message (surfaced as a 502 by
-// handleDiscover, the same as any other discovery failure -- a missing
-// param and a real network/credential error both mean "this scan didn't
-// happen", no finer distinction needed on the wire). mDNS
+// DNS is wired up too, needing a `cidr` -- unlike a hub's own inventory
+// call, there's no *universal* default for "which subnet", but a real
+// LAN's own subnet doesn't change from scan to scan, so a real, optional
+// default lives in .env (METERKAST_DNS_CIDR, real-instance-specific
+// config, same reasoning DIRIGERA_HOSTNAME already follows -- not a
+// secret, but shouldn't be hardcoded into a committed file either): the
+// request's own `cidr` query param wins when present (a one-off different
+// subnet), the env default otherwise, and only an outright missing value
+// on both sides throws (surfaced as a 502 by handleDiscover). mDNS
 // discovery (browsing for arbitrary LAN devices, not resolving an
 // already-configured hostname) needs a different mechanism again
 // (DNS-SD's own meta-query) and is parked -- see README.md "Discovering
 // unclaimed devices".
+const dnsDefaultCidr = process.env.METERKAST_DNS_CIDR;
 const discover = {
   dirigera: async () => {
     const hostname = process.env.DIRIGERA_HOSTNAME;
@@ -85,14 +89,18 @@ const discover = {
     return unclaimedSmartbridgeDevices(devices, recordsAsObject(registry));
   },
   dns: async (query) => {
-    const cidr = query.get("cidr");
-    if (!cidr) throw new Error('DNS discovery needs a "cidr" query param, e.g. ?cidr=192.168.1.0/24');
+    const cidr = query.get("cidr") || dnsDefaultCidr;
+    if (!cidr) {
+      throw new Error(
+        'DNS discovery needs a "cidr" query param, e.g. ?cidr=192.168.1.0/24 -- or set METERKAST_DNS_CIDR in .env as a default',
+      );
+    }
     const scanResults = await scanSubnet(cidr);
     return unclaimedDnsCandidates(scanResults, recordsAsObject(registry));
   },
 };
 
-const server = createServer(registry, displayFields, { playlistPath, discover });
+const server = createServer(registry, displayFields, { playlistPath, discover, dnsDefaultCidr });
 const port = Number(process.env.PORT ?? 8420);
 server.listen(port, () => {
   log("info", `meterkast-dns listening on http://localhost:${port}`);
