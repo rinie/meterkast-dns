@@ -33,14 +33,58 @@ test("resolveHostname resolves a plain mDNS hostname to an A record", async () =
   await withFakeResponder(
     (responder) => (query) => {
       const q = query.questions[0];
-      if (q?.type === "A" && q.name === "test-host.local") {
+      if (q?.type === "ANY" && q.name === "test-host.local") {
         responder.respond({ answers: [{ name: "test-host.local", type: "A", ttl: 120, data: "10.9.8.7" }] });
       }
     },
     async (resolver) => {
       const result = await resolveHostname(resolver, "test-host.local", { timeoutMs: 1000 });
       assert.equal(result.resolvedAddress, "10.9.8.7");
+      assert.equal(result.family, "A");
       assert.equal(result.ttl, 120);
+    },
+  );
+});
+
+// Real finding, not a hypothetical: querying "A" for a real, live,
+// mDNS-reachable Home Assistant instance on a real LAN came back empty --
+// `ping homeassistant.local` succeeded via a link-local IPv6 (fe80::...)
+// address the whole time. This is that case reproduced deterministically.
+test("resolveHostname falls back to AAAA when a responder is IPv6-only", async () => {
+  await withFakeResponder(
+    (responder) => (query) => {
+      const q = query.questions[0];
+      if (q?.type === "ANY" && q.name === "homeassistant.local") {
+        responder.respond({
+          answers: [{ name: "homeassistant.local", type: "AAAA", ttl: 120, data: "fe80::dd5:891:aabe:aa77" }],
+        });
+      }
+    },
+    async (resolver) => {
+      const result = await resolveHostname(resolver, "homeassistant.local", { timeoutMs: 1000 });
+      assert.equal(result.resolvedAddress, "fe80::dd5:891:aabe:aa77");
+      assert.equal(result.family, "AAAA");
+    },
+  );
+});
+
+test("resolveHostname prefers A over AAAA when a responder offers both", async () => {
+  await withFakeResponder(
+    (responder) => (query) => {
+      const q = query.questions[0];
+      if (q?.type === "ANY" && q.name === "dual-stack.local") {
+        responder.respond({
+          answers: [
+            { name: "dual-stack.local", type: "A", ttl: 120, data: "10.5.5.5" },
+            { name: "dual-stack.local", type: "AAAA", ttl: 120, data: "fe80::1" },
+          ],
+        });
+      }
+    },
+    async (resolver) => {
+      const result = await resolveHostname(resolver, "dual-stack.local", { timeoutMs: 1000 });
+      assert.equal(result.resolvedAddress, "10.5.5.5");
+      assert.equal(result.family, "A");
     },
   );
 });
@@ -50,7 +94,7 @@ test("resolveHostname rejects with a clear error when nothing responds", async (
   try {
     await assert.rejects(
       resolveHostname(resolver, "nobody-home.local", { timeoutMs: 200 }),
-      /no A record found for nobody-home\.local/,
+      /no A or AAAA record found for nobody-home\.local/,
     );
   } finally {
     resolver.destroy();
@@ -83,7 +127,7 @@ test("resolveService walks PTR -> SRV -> A -> TXT to a full broker address", asy
           answers: [{ name: "My Broker._mqtt._tcp.local", type: "TXT", ttl: 120, data: [Buffer.from("proto=3.1.1")] }],
         });
       }
-      if (q?.type === "A" && q.name === "broker.local") {
+      if (q?.type === "ANY" && q.name === "broker.local") {
         responder.respond({ answers: [{ name: "broker.local", type: "A", ttl: 120, data: "10.1.2.3" }] });
       }
     },

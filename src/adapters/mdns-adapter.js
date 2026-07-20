@@ -58,12 +58,29 @@ export function decodeTxt(buffers) {
   return txt;
 }
 
+// Queries "ANY" rather than hardcoding "A" -- confirmed against a real
+// device on a real LAN (Home Assistant's zeroconf responder) that a plain
+// A query can come back empty while the device is genuinely live and
+// mDNS-reachable, just IPv6-only on that network path (a link-local fe80::
+// address, no A record at all). A well-behaved responder answers ANY with
+// every record it has for that name, A and AAAA together when both exist
+// (RFC 6762 §6), so this is the more honest query -- "give me whatever
+// address you have", not "give me only IPv4 or nothing". IPv4 is preferred
+// when both come back, since most downstream consumers (an HTTP client,
+// say) still expect it, but the family actually used is reported in
+// `meta` rather than silently assumed.
 export async function resolveHostname(mdns, hostname, { timeoutMs = 3000 } = {}) {
-  const answers = await queryOnce(mdns, { name: hostname, type: "A" }, (a) => a.type === "A" && a.name === hostname, timeoutMs);
+  const answers = await queryOnce(
+    mdns,
+    { name: hostname, type: "ANY" },
+    (a) => (a.type === "A" || a.type === "AAAA") && a.name === hostname,
+    timeoutMs,
+  );
   if (answers.length === 0) {
-    throw new Error(`mDNS: no A record found for ${hostname}`);
+    throw new Error(`mDNS: no A or AAAA record found for ${hostname}`);
   }
-  return { resolvedAddress: answers[0].data, ttl: answers[0].ttl };
+  const preferred = answers.find((a) => a.type === "A") ?? answers[0];
+  return { resolvedAddress: preferred.data, family: preferred.type, ttl: preferred.ttl };
 }
 
 // PTR (service type -> instance) -> SRV (instance -> host:port) -> A
@@ -83,8 +100,14 @@ export async function resolveService(mdns, serviceName, { timeoutMs = 3000 } = {
   }
   const { target, port } = srvAnswers[0].data;
 
-  const aAnswers = await queryOnce(mdns, { name: target, type: "A" }, (a) => a.type === "A" && a.name === target, timeoutMs);
-  const host = aAnswers[0]?.data ?? target; // fall back to the SRV target name if A didn't resolve within the window
+  const targetAnswers = await queryOnce(
+    mdns,
+    { name: target, type: "ANY" },
+    (a) => (a.type === "A" || a.type === "AAAA") && a.name === target,
+    timeoutMs,
+  );
+  const targetAnswer = targetAnswers.find((a) => a.type === "A") ?? targetAnswers[0];
+  const host = targetAnswer?.data ?? target; // fall back to the SRV target name if neither resolved within the window
 
   const txtAnswers = await queryOnce(mdns, { name: instanceName, type: "TXT" }, (a) => a.type === "TXT" && a.name === instanceName, timeoutMs);
   const txt = txtAnswers.length > 0 ? decodeTxt(txtAnswers[0].data) : {};

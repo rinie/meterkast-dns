@@ -309,19 +309,37 @@ logged a clear per-device error, and the daemon kept running with Dirigera,
 Ecowitt, and Smartbridge still serving real data alongside it — the same
 isolation already verified for a missing credential now confirmed for a
 missing mDNS responder too. **What that real-LAN attempt did *not*
-establish, worth recording precisely rather than reading as a pass:** this
-dev machine's own IP is confirmed on the same `192.168.1.0/24` subnet as
-the already-verified-reachable Dirigera hub, yet even the universal
-`_services._dns-sd._udp.local` meta-query — which essentially any mDNS-
-capable device on a home network answers — got no response at all after
-several seconds. That's more consistent with this specific tool
-environment restricting outbound multicast/IGMP or inbound UDP 5353
-reception than with a genuinely mDNS-silent home network, but it wasn't
-tracked down further, so it's an open question rather than a diagnosed
-one. The code that would answer it either way — real device on, real
-response in — is written and passed its real-protocol tests; whoever runs
-`npm start` on an unrestricted network with a real mDNS-advertising device
-nearby is the one who can close this specific gap.
+establish, and this time with a diagnosed cause, not just a suspected
+one:** this dev machine's own IP is confirmed on the same
+`192.168.1.0/24` subnet as the already-verified-reachable Dirigera hub,
+yet even the universal `_services._dns-sd._udp.local` meta-query got no
+response, and neither did a real, known-good, same-subnet target
+(`homeassistant.local` — Home Assistant's `zeroconf` integration, on by
+default, publishes exactly this hostname). The same machine's own
+`ping homeassistant.local` succeeded immediately, resolving to a
+link-local IPv6 address (`fe80::...`) — proving the device is live and
+genuinely mDNS-reachable on this network. The difference: `ping` resolves
+`.local` names through Windows' own DNS Client service (`svchost.exe`),
+and `Get-NetFirewallRule` confirms the built-in "mDNS (UDP-In)" allow
+rule is scoped specifically to that binary. Chrome, Edge, and Copilot each
+carry their *own* dedicated per-app mDNS inbound rules; `node.exe` has
+none. So this project's outbound mDNS queries leave the machine fine (no
+outbound blocking by default), but the multicast responses coming back
+are dropped by Windows Firewall before they reach the Node process —
+a per-app inbound rule gap, not a code defect, and not a silent LAN. Two
+things follow: `resolveHostname`/`resolveService` were extended to query
+`ANY` rather than hardcoding `A`, and to fall back to `AAAA`, once the
+`homeassistant.local` case surfaced that a live, reachable device can be
+IPv6-only on `.local` — a real, observed case (see
+`test/mdns.test.js`'s "IPv6-only" test, modeled directly on this
+finding), not a hypothetical. That fix is verified against the same
+real-protocol test tier as everything else here, but it did not change
+the real-LAN result, exactly as expected: the packets never arrive at
+all, regardless of which record type was asked for. Closing this gap for
+real needs a Windows Firewall inbound rule allowing UDP 5353 for
+`node.exe` — a system-settings change, so this project doesn't make it
+itself; add it, then `npm start` should resolve `homeassistant.local` for
+real.
 
 **USB (`udev`), Zigbee (a coordinator), and 433MHz/IR (RC5/newKaku
 decoding) *native background-daemon* adapters remain out of scope
