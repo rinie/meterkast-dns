@@ -188,7 +188,7 @@ test("handleList adds curated display lines per record's own transport, empty fo
   const records = JSON.parse(res.body);
   const weatherStation = records.find((r) => r.name === "weather-station");
   const kitchenLamp = records.find((r) => r.name === "kitchen-lamp");
-  assert.deepEqual(weatherStation.display, [{ label: "Indoor Temperature", display: "23,5 ℃" }]);
+  assert.deepEqual(weatherStation.display, [{ label: "Indoor Temperature", display: "23.5 ℃" }]);
   assert.deepEqual(kitchenLamp.display, []);
 });
 
@@ -206,5 +206,5 @@ test("handleGet includes the same curated display lines for a single record", ()
   const res = fakeResponse();
   handleGet(registry, displayFields, "weather-station", {}, res);
 
-  assert.deepEqual(JSON.parse(res.body).display, [{ label: "Indoor Temperature", display: "23,5 ℃" }]);
+  assert.deepEqual(JSON.parse(res.body).display, [{ label: "Indoor Temperature", display: "23.5 ℃" }]);
 });

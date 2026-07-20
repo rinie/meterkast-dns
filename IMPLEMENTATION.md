@@ -625,11 +625,18 @@ the display half of the same story — `display-fields.toml` and
 `handleList`/`handleGet` now add a `display` array (curated
 `{label, display}` lines) alongside a record's raw `meta`, computed from
 `display-fields.toml`'s per-transport mapping — unit tested (path
-resolution, missing-path skip, comma-decimal formatting, the
+resolution, missing-path skip, number formatting, the
 graceful-degradation empty-object shape for a missing file, same as
 `readPlaylist`) and confirmed against the real live daemon:
-`GET /devices/weather-station` returned real `Indoor Temperature: 23,8 ℃`
-alongside the other three curated lines. **Wiring it into the actual
+`GET /devices/weather-station` returned real `Indoor Temperature: 23.5 ℃`
+alongside the other three curated lines. (Number formatting went through
+one real revision worth recording: first built with a comma decimal
+separator, mirroring the physical console the request referenced; a
+direct follow-up ("keep the decimal dot ... internally and external
+display") corrected that — `formatNumber` now uses `toFixed(1)`, a plain
+period decimal with no locale involved at all, everywhere, not just
+internally. Saved as a standing preference for future work in this and
+other projects, not just this one call site.) **Wiring it into the actual
 `/screens/devices` page surfaced a real bug, not caught by any unit
 test**: `devices.md`'s `<div id="display-fields">` placeholder — plain
 raw HTML in a markdown file, expected to pass through unchanged — was

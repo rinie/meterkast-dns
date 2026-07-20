@@ -13,14 +13,17 @@ function getPath(obj, path) {
 }
 
 // Ecowitt (and most weather APIs) hand back numbers as decimal-point
-// strings ("20.5") regardless of which unit was requested -- formatted
-// here with a comma decimal separator, matching how a Dutch console
-// (and this project's own user) actually reads a temperature, not the
-// API's own US-style formatting.
+// strings ("20.5") already -- normalized here to a fixed one decimal
+// place for consistency (an integer-looking "20" still shows as "20.0"),
+// but the decimal separator itself stays a plain period, on request:
+// programming convention, not locale formatting, both internally and in
+// this display. `toFixed` rather than `toLocaleString` specifically
+// because the latter defaults to the runtime's own locale, which could
+// silently reintroduce a comma decimal on a differently-configured host.
 function formatNumber(value) {
   const num = Number(value);
   if (Number.isNaN(num)) return String(value);
-  return num.toLocaleString("nl-NL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return num.toFixed(1);
 }
 
 // fieldDefs: [{label, valuePath, unitPath?}], meta: a device's own meta

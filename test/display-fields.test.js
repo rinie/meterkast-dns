@@ -15,14 +15,14 @@ const ECOWITT_META = {
   },
 };
 
-test("flattenDisplayFields resolves dot-paths and formats value+unit with a comma decimal", () => {
+test("flattenDisplayFields resolves dot-paths and formats value+unit with a period decimal", () => {
   const fieldDefs = [{ label: "Indoor Temperature", valuePath: "indoor.temperature.value", unitPath: "indoor.temperature.unit" }];
-  assert.deepEqual(flattenDisplayFields(fieldDefs, ECOWITT_META), [{ label: "Indoor Temperature", display: "23,5 ℃" }]);
+  assert.deepEqual(flattenDisplayFields(fieldDefs, ECOWITT_META), [{ label: "Indoor Temperature", display: "23.5 ℃" }]);
 });
 
 test("flattenDisplayFields works without a unitPath -- no trailing unit", () => {
   const fieldDefs = [{ label: "Indoor Humidity Value Only", valuePath: "indoor.humidity.value" }];
-  assert.deepEqual(flattenDisplayFields(fieldDefs, ECOWITT_META), [{ label: "Indoor Humidity Value Only", display: "44,0" }]);
+  assert.deepEqual(flattenDisplayFields(fieldDefs, ECOWITT_META), [{ label: "Indoor Humidity Value Only", display: "44.0" }]);
 });
 
 test("flattenDisplayFields skips a field whose path doesn't resolve, keeps the rest", () => {
@@ -30,7 +30,7 @@ test("flattenDisplayFields skips a field whose path doesn't resolve, keeps the r
     { label: "Pressure (not in this reading)", valuePath: "pressure.absolute.value" },
     { label: "Outdoor Temperature", valuePath: "outdoor.temperature.value", unitPath: "outdoor.temperature.unit" },
   ];
-  assert.deepEqual(flattenDisplayFields(fieldDefs, ECOWITT_META), [{ label: "Outdoor Temperature", display: "20,5 ℃" }]);
+  assert.deepEqual(flattenDisplayFields(fieldDefs, ECOWITT_META), [{ label: "Outdoor Temperature", display: "20.5 ℃" }]);
 });
 
 test("flattenDisplayFields returns an empty array for missing meta or missing fieldDefs", () => {

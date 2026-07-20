@@ -732,10 +732,13 @@ an attempt to flatten the whole `meta` tree generically. `valuePath`/
 `unitPath` are dot-paths into a device's own `meta`; a path that doesn't
 resolve for a given reading is skipped rather than shown blank, same
 "only show what's real" reasoning as `/resolved` leaving out a
-never-resolved entry entirely. Numbers are formatted with a comma decimal
-separator (`23,7`, not `23.7`) — the API's own value strings are US-style
-regardless of which unit was requested, formatted here to match how the
-number is actually read, not re-transmitted as-is.
+never-resolved entry entirely. Numbers are normalized to a fixed one
+decimal place (`23.5`, not a bare `23`) but the decimal separator itself
+stays a plain period — programming convention, not locale formatting,
+by explicit request: comma is reserved for separating values (CSV,
+lists), never doubling as a decimal point the way some locales' Excel
+defaults do. `toFixed`, not `toLocaleString`, specifically to avoid
+picking up the host's own locale by accident.
 
 Committed, not gitignored, unlike `device-playlist.toml`: a path into a
 transport's own known response shape isn't personal network topology,
