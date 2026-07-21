@@ -1,0 +1,4 @@
+[
+  { "serviceType": "_home-assistant._tcp", "hostname": "homeassistant.local", "ip": "192.168.1.50", "port": 8123 },
+  { "serviceType": "_googlecast._tcp", "hostname": "chromecast-abcd.local", "ip": "192.168.1.60", "port": 8009 }
+]
