@@ -1,5 +1,5 @@
 // Shared plumbing for talking to a meterkast proxy board -- a small
-// Arduino-style HTTP server (see the separate meterkast-esp32-proxy
+// Arduino-style HTTP server (see the separate meterkast-proxy
 // repo/README) that does BLE scanning and mDNS querying on real
 // hardware and exposes both as plain JSON. Board-agnostic on this side
 // on purpose: an ESP32, a Pico W, or a Raspberry Pi running the same

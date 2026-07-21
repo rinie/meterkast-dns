@@ -130,11 +130,11 @@ export async function resolveService(mdns, serviceName, { timeoutMs = 3000 } = {
 // own Windows Firewall blocks node.exe's local multicast mDNS traffic
 // entirely (see README.md "Discovering unclaimed devices"). A proxy
 // board on the same LAN (any board running the small JSON contract in
-// the separate meterkast-esp32-proxy repo -- see proxy-adapter.js) has
+// the separate meterkast-proxy repo -- see proxy-adapter.js) has
 // no such restriction and can resolve on this daemon's behalf.
 //
 // The proxy's own /scan/mdns is a periodic browse-and-cache (see
-// meterkast-esp32-proxy's mdns_browser.cpp), not a targeted per-name
+// meterkast-proxy's mdns_browser.cpp), not a targeted per-name
 // resolve -- so this looks up the requested address in whatever the
 // proxy most recently cached, rather than triggering a fresh query per
 // call the way local resolution does. A device whose service type isn't
