@@ -14,7 +14,7 @@ async function loadBleFixture() {
 
 // Real local plain-HTTP server standing in for a real proxy board -- the
 // firmware's own webserver is plain HTTP, not HTTPS (see
-// meterkast-esp32-proxy/src/web_server.cpp), so this is the honest
+// meterkast-proxy/src/web_server.cpp), so this is the honest
 // equivalent of the self-signed-HTTPS-server pattern dirigera.test.js/
 // smartbridge.test.js already use for their own real HTTP round trips.
 function startFakeProxyServer(routes) {
