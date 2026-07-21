@@ -7,10 +7,10 @@ import { upsertRecord, recordsAsObject } from "./registry.js";
 // itself -- see IMPLEMENTATION.md "Isolation is not the default" -- the
 // caller is expected to .catch() and log, not let one adapter's failure
 // take the whole daemon down.
-export async function runPollingAdapter(registry, transport, adapterFn) {
+export async function runPollingAdapter(registry, transport, adapterFn, options = {}) {
   const hasDevices = [...registry.records.values()].some((record) => record.transport === transport);
   if (!hasDevices) return;
-  for await (const reading of adapterFn(recordsAsObject(registry))) {
+  for await (const reading of adapterFn(recordsAsObject(registry), options)) {
     upsertRecord(registry, reading.name, reading);
   }
 }

@@ -8,8 +8,9 @@ import { resolveSecretEnv } from "../src/core/secrets.js";
 import dirigeraAdapter, { fetchDirigeraDevices, unclaimedDirigeraDevices } from "../src/adapters/dirigera-adapter.js";
 import ecowittAdapter from "../src/adapters/ecowitt-adapter.js";
 import smartbridgeAdapter, { fetchSmartbridgeDevices, unclaimedSmartbridgeDevices } from "../src/adapters/smartbridge-adapter.js";
-import mdnsAdapter from "../src/adapters/mdns-adapter.js";
+import mdnsAdapter, { discoverMdnsViaProxies, unclaimedMdnsCandidates } from "../src/adapters/mdns-adapter.js";
 import dnsAdapter, { scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from "../src/adapters/dns-adapter.js";
+import { parseProxyHosts, discoverBleViaProxies, unclaimedProxyBleDevices } from "../src/adapters/proxy-adapter.js";
 import { listWindowsUsbDevices, unclaimedWindowsUsbDevices } from "../src/adapters/usb-windows-adapter.js";
 import {
   listWindowsPairedBluetoothDevices,
@@ -47,15 +48,26 @@ for (const [name, record] of Object.entries(flattenDeviceReadings(devices))) {
   upsertRecord(registry, name, record);
 }
 
+// A single daemon-level proxyUrl (mdnsAdapter's own option, not a
+// per-device choice -- see mdns-adapter.js) so already-claimed mdns
+// entries resolve through the proxy too, not just discovery below. Only
+// the first configured proxy host is used for this -- multiple proxies
+// only matters for *discovery* (browsing everything every board sees),
+// not for resolving one already-known name, where one answer is enough.
+const proxyUrls = parseProxyHosts(process.env.METERKAST_PROXY_HOSTS);
+if (proxyUrls.length > 0) {
+  log("info", `mDNS proxy resolution enabled via ${proxyUrls[0]} (this machine's own local mDNS is firewall-blocked -- see IMPLEMENTATION.md)`);
+}
+
 const pollingAdapters = [
-  ["dirigera", "Dirigera", dirigeraAdapter],
-  ["ecowitt", "Ecowitt", ecowittAdapter],
-  ["smartbridge", "Smartbridge", smartbridgeAdapter],
-  ["mdns", "mDNS", mdnsAdapter],
-  ["dns", "DNS", dnsAdapter],
+  ["dirigera", "Dirigera", dirigeraAdapter, {}],
+  ["ecowitt", "Ecowitt", ecowittAdapter, {}],
+  ["smartbridge", "Smartbridge", smartbridgeAdapter, {}],
+  ["mdns", "mDNS", mdnsAdapter, proxyUrls.length > 0 ? { proxyUrl: proxyUrls[0] } : {}],
+  ["dns", "DNS", dnsAdapter, {}],
 ];
-for (const [transport, label, adapterFn] of pollingAdapters) {
-  runPollingAdapter(registry, transport, adapterFn).catch((error) => {
+for (const [transport, label, adapterFn, options] of pollingAdapters) {
+  runPollingAdapter(registry, transport, adapterFn, options).catch((error) => {
     log("error", `${label} adapter stopped: ${error.message}`);
   });
 }
@@ -84,9 +96,13 @@ for (const [transport, label, adapterFn] of pollingAdapters) {
 // WinRT async call) -- no native Node addon, matching this machine's own
 // real constraint (no build toolchain installed; see IMPLEMENTATION.md).
 // mDNS discovery (browsing for arbitrary LAN devices, not resolving an
-// already-configured hostname) needs a different mechanism again
-// (DNS-SD's own meta-query) and is parked -- see README.md "Discovering
-// unclaimed devices".
+// already-configured hostname) previously had no path at all on this
+// machine (its own local mDNS is firewall-blocked outright, not just
+// slow) -- unblocked now via a real meterkast-proxy board, same
+// METERKAST_PROXY_HOSTS config bluetooth-proxy below reuses. No
+// METERKAST_PROXY_HOSTS configured means both stay unavailable (a clear
+// thrown error, not a silent empty result), same as DNS discovery with no
+// CIDR.
 const autoDetectedCidr = detectLocalCidr();
 const dnsDefaultCidr = process.env.METERKAST_DNS_CIDR ?? autoDetectedCidr?.cidr;
 const dnsDefaultCidrSource = process.env.METERKAST_DNS_CIDR
@@ -144,6 +160,31 @@ const discover = {
   "bluetooth-nearby": async () => {
     const rawDevices = await listWindowsNearbyBluetoothDevices();
     return unclaimedNearbyBluetoothDevices(rawDevices, recordsAsObject(registry));
+  },
+  // The other half of the "mDNS via proxy is a setting, not a transport"
+  // design (see mdns-adapter.js) -- this is the browse-for-unclaimed
+  // side, previously parked because this machine's own local mDNS is
+  // firewall-blocked outright (see IMPLEMENTATION.md). A real proxy board
+  // (see the separate meterkast-proxy repo) unblocks it: every configured
+  // proxy is queried in parallel, so a household with boards covering
+  // different areas sees candidates from all of them, not just one.
+  mdns: async () => {
+    if (proxyUrls.length === 0) {
+      throw new Error("mDNS discovery needs METERKAST_PROXY_HOSTS set in .env -- no local browse fallback (see README.md)");
+    }
+    const proxyEntries = await discoverMdnsViaProxies(proxyUrls);
+    return unclaimedMdnsCandidates(proxyEntries, recordsAsObject(registry));
+  },
+  // A third bluetooth discover key alongside bluetooth-paired/nearby
+  // (all three candidates carry transport: "bluetooth") -- real MAC
+  // addresses from the proxy's own NimBLE scan, same as the Windows-native
+  // paths, unlike WebBluetooth's deliberately opaque device.id.
+  "bluetooth-proxy": async () => {
+    if (proxyUrls.length === 0) {
+      throw new Error("Proxy BLE discovery needs METERKAST_PROXY_HOSTS set in .env (see README.md)");
+    }
+    const rawByProxy = await discoverBleViaProxies(proxyUrls);
+    return unclaimedProxyBleDevices(rawByProxy, recordsAsObject(registry));
   },
 };
 
