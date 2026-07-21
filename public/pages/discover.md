@@ -54,3 +54,30 @@ OS.
 ```datatable
 {"discover": true, "endpoint": "/discover/usb", "buttonLabel": "Scan USB Devices", "columns": ["suggestedName", "address"]}
 ```
+
+## Bluetooth (Windows, Paired)
+
+Every Bluetooth device Windows has already paired/bonded with
+(`Get-PnpDevice`), fast -- a couple seconds. A real MAC address, not
+WebBluetooth's opaque `device.id` (Web Bluetooth deliberately never
+exposes a device's true address to page JS). Windows-only.
+
+```datatable
+{"discover": true, "endpoint": "/discover/bluetooth-paired", "buttonLabel": "Scan Paired Bluetooth", "columns": ["suggestedName", "address"]}
+```
+
+## Bluetooth (Windows, Nearby)
+
+Devices Windows can currently see advertising nearby but hasn't paired
+with -- a real scan, not a cached list, using a one-shot WinRT call (no
+compiled helper, no native Node addon). **Takes about 30 seconds** --
+that's a real discovery window Windows itself runs, not something this
+page controls or can speed up. (The more obvious API for this,
+`BluetoothLEAdvertisementWatcher`'s own live event stream, doesn't work
+here at all: Windows PowerShell can't subscribe to WinRT events --
+confirmed directly, not assumed -- so this uses a different, one-shot
+WinRT call instead.) Windows-only.
+
+```datatable
+{"discover": true, "endpoint": "/discover/bluetooth-nearby", "buttonLabel": "Scan Nearby Bluetooth (~30s)", "columns": ["suggestedName", "address"]}
+```

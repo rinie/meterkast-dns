@@ -967,6 +967,30 @@ confirms a device with that VID:PID genuinely exists and is plugged in.
 Windows-only, and says so with a clear error on any other OS rather than
 failing silently or guessing.
 
+Bluetooth discovery is Windows-native too, in `bluetooth-windows-adapter.js`,
+and produces a real MAC address — an actual improvement over
+`web-scan.html`'s own WebBluetooth-based "Scan for a device," whose
+`device.id` is only ever an opaque, origin-scoped identifier (Web
+Bluetooth deliberately never exposes a device's true address to page
+JS). Two separate sources, not one: **paired** devices
+(`Get-PnpDevice`, `BTHENUM\DEV_<mac>` entries — fast, a couple seconds,
+the same shell-out shape as USB) and **nearby unpaired** devices (a real
+~30-second scan). The live-scan API this would naturally use —
+`BluetoothLEAdvertisementWatcher`'s own event stream — doesn't work at
+all here, confirmed directly rather than assumed: Windows PowerShell
+returns "Windows PowerShell cannot subscribe to Windows RT events" the
+moment `Register-ObjectEvent` is tried against it. `DeviceInformation.FindAllAsync`
+works instead — a one-shot async *operation*, not a continuous event,
+bridged onto a real .NET `Task` via reflection — and Windows itself runs
+a real, repeatable ~30 second discovery window before it completes (not
+an arbitrary hang: measured directly, 30.0–30.3 seconds across every
+real run on this machine). Both the script's own internal wait and the
+Node-side `execFile` call carry their own bounded timeout, two
+independent layers, so neither a hung child process nor a hung `Task`
+can block an HTTP request indefinitely. Both sources are Windows-only,
+and the nearby scan's real ~30-second cost is stated plainly in the UI
+rather than left as a silent, unexplained wait.
+
 mDNS discovery (browsing for arbitrary LAN devices advertising over
 Bonjour, rather than resolving an already-configured hostname) is the one
 piece deliberately not built here — parked on this project's own

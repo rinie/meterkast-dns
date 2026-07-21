@@ -11,6 +11,12 @@ import smartbridgeAdapter, { fetchSmartbridgeDevices, unclaimedSmartbridgeDevice
 import mdnsAdapter from "../src/adapters/mdns-adapter.js";
 import dnsAdapter, { scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from "../src/adapters/dns-adapter.js";
 import { listWindowsUsbDevices, unclaimedWindowsUsbDevices } from "../src/adapters/usb-windows-adapter.js";
+import {
+  listWindowsPairedBluetoothDevices,
+  unclaimedPairedBluetoothDevices,
+  listWindowsNearbyBluetoothDevices,
+  unclaimedNearbyBluetoothDevices,
+} from "../src/adapters/bluetooth-windows-adapter.js";
 import { log } from "../src/core/log.js";
 
 const playlistPath =
@@ -73,13 +79,14 @@ for (const [transport, label, adapterFn] of pollingAdapters) {
 // logged at startup and surfaced through GET /discover/dns/default-cidr
 // (see server.js), so an auto-detected default is never a silent guess.
 // Only a genuine absence on all three levels throws (surfaced as a 502 by
-// handleDiscover). USB is wired up too, Windows-native via Get-PnpDevice
-// -- no native Node addon, matching this machine's own real constraint
-// (no build toolchain installed; see IMPLEMENTATION.md). mDNS discovery
-// (browsing for arbitrary LAN devices, not resolving an already-configured
-// hostname) needs a different mechanism again (DNS-SD's own meta-query)
-// and is parked -- see
-// README.md "Discovering unclaimed devices".
+// handleDiscover). USB and Bluetooth are wired up too, both Windows-native
+// via Get-PnpDevice (Bluetooth's nearby-scan additionally uses a one-shot
+// WinRT async call) -- no native Node addon, matching this machine's own
+// real constraint (no build toolchain installed; see IMPLEMENTATION.md).
+// mDNS discovery (browsing for arbitrary LAN devices, not resolving an
+// already-configured hostname) needs a different mechanism again
+// (DNS-SD's own meta-query) and is parked -- see README.md "Discovering
+// unclaimed devices".
 const autoDetectedCidr = detectLocalCidr();
 const dnsDefaultCidr = process.env.METERKAST_DNS_CIDR ?? autoDetectedCidr?.cidr;
 const dnsDefaultCidrSource = process.env.METERKAST_DNS_CIDR
@@ -122,6 +129,21 @@ const discover = {
   usb: async () => {
     const pnpDevices = await listWindowsUsbDevices();
     return unclaimedWindowsUsbDevices(pnpDevices, recordsAsObject(registry));
+  },
+  // Two separate discover keys for one transport (both candidates carry
+  // transport: "bluetooth") -- deliberately not folded into one "scan
+  // everything" call: paired devices come back in ~2s via Get-PnpDevice,
+  // nearby unpaired ones take a real ~30s WinRT discovery window (see
+  // bluetooth-windows-adapter.js) that Windows itself runs, not something
+  // this code controls the duration of. A single combined endpoint would
+  // force the fast path to always pay the slow path's cost.
+  "bluetooth-paired": async () => {
+    const pnpDevices = await listWindowsPairedBluetoothDevices();
+    return unclaimedPairedBluetoothDevices(pnpDevices, recordsAsObject(registry));
+  },
+  "bluetooth-nearby": async () => {
+    const rawDevices = await listWindowsNearbyBluetoothDevices();
+    return unclaimedNearbyBluetoothDevices(rawDevices, recordsAsObject(registry));
   },
 };
 

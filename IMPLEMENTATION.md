@@ -1089,6 +1089,79 @@ through the real running daemon returned the same 3 deduped devices in
 1.6s; `/screens/discover`'s new "USB (Windows)" panel rendered them
 correctly with working "Add to playlist" buttons in the real browser.
 
+**Immediate follow-up: "add a windows-native bluetooth scan too, without
+any compilation step."** Investigated two real APIs live, on this
+machine, before writing any adapter code — the same "verify before
+committing" discipline this project has held throughout.
+
+First, `Get-PnpDevice` filtered to `BTHENUM\DEV_*` (mirroring the USB
+approach): real, clean, one entry per physical *paired* device already —
+this machine returned exactly two (`JBL PartyBox Encore`,
+`RCS Soundboom`), each with a real embedded MAC, no dedup even needed in
+practice (though `parsePairedBluetoothDevices` still dedupes defensively,
+not assuming that holds on every Windows Bluetooth stack version).
+
+Second, a genuine *scan* for nearby, unpaired devices — the part of "add
+a bluetooth scan" a static paired-devices list doesn't answer. The
+obvious API, `BluetoothLEAdvertisementWatcher`'s own live `Received`
+event, was tried for real and failed with a specific, unambiguous error:
+`Register-ObjectEvent : Windows PowerShell cannot subscribe to Windows RT
+events.` — a genuine platform limitation of Windows PowerShell 5.1 (this
+machine has no `pwsh`/PowerShell 7 installed, which might handle WinRT
+events differently). Rather than stop there, tried a one-shot
+`DeviceInformation.FindAllAsync` call instead — an async *operation*, not
+a continuous event stream, bridged onto a real .NET `Task` via reflection
+onto `WindowsRuntimeSystemExtensions.AsTask<T>` (the first reflection
+attempt picked the wrong overload — the non-generic `IAsyncAction` one —
+until the method search was narrowed to
+`IsGenericMethodDefinition`/parameter-type-name `IAsyncOperation*`). This
+worked, returning **13 real nearby BLE devices** on the first successful
+run — a Bosch dishwasher/oven, a Hue bulb, two Xiaomi/ATC thermometer
+beacons, and several unnamed ones — confirmed real, not synthesized, and
+became the test fixture. Measured directly across repeated runs: the call
+consistently takes **30.0–30.3 seconds**, a real discovery window Windows
+itself runs internally, not an arbitrary hang — this shaped the final
+design (`.Wait(35000)` inside the script, `timeout: 45000` on the Node
+`execFile` call, two independent bounded layers so neither a hung child
+process nor a hung `Task` can block an HTTP request indefinitely — the
+same class of failure `window.prompt()` caused in the browser earlier
+this session, caught before it could ship here instead of after).
+
+`bluetooth-windows-adapter.js` ships both as separate discovery sources
+(`discover["bluetooth-paired"]`/`discover["bluetooth-nearby"]` in
+`bin/meterkastd.js`, both producing `transport: "bluetooth"` candidates)
+rather than one combined "scan everything" call — deliberately, so the
+fast path never has to pay the slow path's real ~30-second cost. Both
+give a real MAC address (parsed from `BTHENUM\DEV_<mac>` for paired
+devices, from the trailing `-<mac>` in a nearby device's own
+`BluetoothLE#BluetoothLE<adapter>-<device>` id), a genuine improvement
+over `web-scan.html`'s existing WebBluetooth-based "Scan for a device":
+Web Bluetooth deliberately never exposes a device's real address to page
+JS, so that flow's `device.id` was always only an opaque, origin-scoped
+identifier, never a real Gutenberg MAC the way this is.
+
+Tested at the same two levels as USB: pure functions against fixtures
+captured from this machine's real output (both the paired-devices JSON
+and the 13-device nearby-scan JSON), plus a real end-to-end test for the
+fast paired path (runs in the default suite, ~2s) and a real end-to-end
+test for the nearby scan gated behind `METERKAST_TEST_BLE_SCAN=1` (not
+run by default — a permanent 30-second tax on every future `npm test`
+wasn't worth it for a capability already verified live during this
+session; the test exists and is directly runnable on demand).
+
+Verified live through the full stack, both sources: `POST
+/discover/bluetooth-paired` returned the same 2 real devices in 2.4s;
+`POST /discover/bluetooth-nearby` returned the same 13 real devices in
+30.7s, right in line with the earlier direct measurements. In the real
+browser, `/screens/discover`'s two new Bluetooth panels rendered
+correctly; clicking "Add to playlist" on the real `JBL PartyBox Encore`
+row, confirming the pre-filled name, and clicking Save produced a real
+claim — `GET /devices/jbl-partybox-encore` came back with the device's
+real MAC address (`54:15:89:9A:7D:66`), the whole discover → claim chain
+verified end to end for a transport that has never once, anywhere in
+this project's history, produced a real Bluetooth MAC through automated
+discovery before this.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
