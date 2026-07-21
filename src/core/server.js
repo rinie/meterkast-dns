@@ -185,14 +185,19 @@ export async function handleDiscover(discoverFns, transport, query, req, res) {
 }
 
 // GET /discover/dns/default-cidr -- lets /screens/discover's DNS panel
-// pre-fill its CIDR input with the real configured value (METERKAST_DNS_CIDR
-// in .env) rather than leaving a plain placeholder the user has to
-// remember to type every time. `null` when unset -- the panel falls back
-// to its own placeholder hint, same as today, not an error: a default is
-// optional, a one-off scan of a different subnet is still typed by hand.
-export function handleDnsDefaultCidr(dnsDefaultCidr, req, res) {
+// pre-fill its CIDR input with the real resolved default (METERKAST_DNS_CIDR
+// in .env, or an auto-detected subnet -- see bin/meterkastd.js's
+// three-tier fallback) rather than leaving a plain placeholder the user
+// has to remember to type every time. `source` names which one actually
+// won ("METERKAST_DNS_CIDR" or `auto-detected from "<interface>"`) so an
+// auto-detected value is always visibly labeled, never a silent guess --
+// the UI shows it next to the input. `null`/`null` when nothing resolved
+// at all -- the panel falls back to its own placeholder hint, same as
+// before this existed, not an error: a default is optional, a one-off
+// scan of a different subnet is still typed by hand.
+export function handleDnsDefaultCidr(dnsDefaultCidr, dnsDefaultCidrSource, req, res) {
   res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify({ cidr: dnsDefaultCidr ?? null }));
+  res.end(JSON.stringify({ cidr: dnsDefaultCidr ?? null, source: dnsDefaultCidr ? dnsDefaultCidrSource : null }));
 }
 
 // POST /playlist/devices -- claims a discovered candidate under a real
@@ -286,7 +291,7 @@ export async function serveStaticFile(relativePath, req, res) {
   }
 }
 
-export function createServer(registry, displayFields = {}, { playlistPath, discover = {}, dnsDefaultCidr } = {}) {
+export function createServer(registry, displayFields = {}, { playlistPath, discover = {}, dnsDefaultCidr, dnsDefaultCidrSource } = {}) {
   return createHttpServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
 
@@ -328,7 +333,7 @@ export function createServer(registry, displayFields = {}, { playlistPath, disco
     }
 
     if (req.method === "GET" && url.pathname === "/discover/dns/default-cidr") {
-      return handleDnsDefaultCidr(dnsDefaultCidr, req, res);
+      return handleDnsDefaultCidr(dnsDefaultCidr, dnsDefaultCidrSource, req, res);
     }
 
     const discoverMatch = url.pathname.match(/^\/discover\/([^/]+)$/);

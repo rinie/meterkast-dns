@@ -1009,6 +1009,46 @@ prior verification already established for this exact subnet — the whole
 zero-typing path works end to end, not just the individual pieces in
 isolation.
 
+**Immediate follow-up: "can you not discover the ip/subnet from my laptop
+address?"** — a real, good question: `os.networkInterfaces()` already
+knows the machine's own IPv4 address and netmask, no external lookup
+needed. `detectLocalCidr` (new, `dns-adapter.js`) reads it, skips
+internal/non-IPv4 addresses, and derives a network-address CIDR from
+whichever interface it prefers. The user's own follow-up ("prefer the no
+VPN as default") named the real complication before it was even raised:
+this exact dev machine runs a corporate VPN client
+(`os.networkInterfaces()` confirmed it as `"Centric Azure VPN"`,
+`172.22.33.40/32`) alongside its real `"Wi-Fi"` adapter
+(`192.168.1.57/24`) — auto-detecting the VPN's own tunnel address instead
+of the LAN would have silently produced a useless default. Since there's
+no OS-portable API flag for "this is a VPN," `detectLocalCidr` uses a
+name-based heuristic (`/vpn|tap|tun\d|ppp|wireguard|.../i`) confirmed
+against this exact real case — `"Centric Azure VPN"` matches on `vpn`
+directly — preferring the first non-matching interface, falling back to
+whatever's there if every candidate looks VPN-like rather than returning
+nothing.
+
+Wired as the third tier of a three-way fallback (request's own `cidr` →
+`METERKAST_DNS_CIDR` → `detectLocalCidr`), with the winning source logged
+at startup and returned from `GET /discover/dns/default-cidr` alongside
+the value, so an auto-detected default is always visibly labeled, never
+folded silently into "just a number that appeared." Test fixtures use the
+real captured shape from this machine's own `os.networkInterfaces()`
+output (Wi-Fi + the real VPN name + loopback), not synthesized data.
+
+Verified live end to end, both directions: with `METERKAST_DNS_CIDR`
+commented out, the startup log read exactly `DNS discovery default
+subnet: 192.168.1.0/24 (auto-detected from "Wi-Fi")` — correctly the LAN,
+not the VPN — `GET /discover/dns/default-cidr` returned
+`{"cidr":"192.168.1.0/24","source":"auto-detected from \"Wi-Fi\""}`, the
+`/screens/discover` DNS input's real `.value` was genuinely pre-filled
+with it, a visible `(auto-detected from "Wi-Fi")` label appeared next to
+the field, and clicking Scan with the field untouched returned the same
+real 33 candidates. Restoring `METERKAST_DNS_CIDR=192.168.1.0/24`
+afterward and restarting confirmed the explicit value still wins outright
+over auto-detection — the startup log switched back to `(METERKAST_DNS_CIDR)`
+with no other change in behavior.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via

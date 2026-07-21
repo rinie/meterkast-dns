@@ -10,6 +10,7 @@
 // because the shape of what gets stored differs. Uses Node's built-in
 // `dns` module -- no new dependency, unlike the mdns adapter.
 import defaultDns from "node:dns/promises";
+import { networkInterfaces } from "node:os";
 import { log } from "../core/log.js";
 
 // Same A-preferred, AAAA-fallback shape as the mdns adapter's
@@ -75,6 +76,55 @@ export function hostAddressesInCidr(cidr) {
   const addresses = [];
   for (let i = start; i < end; i += 1) addresses.push(intToIp(networkInt + i));
   return addresses;
+}
+
+function netmaskToPrefixLength(netmask) {
+  return netmask.split(".").reduce((count, octet) => count + Number(octet).toString(2).split("1").length - 1, 0);
+}
+
+// No OS-portable API flag means "this interface is a VPN" -- this is a
+// best-effort, name-based heuristic instead. Confirmed against a real
+// case rather than invented: this project's own dev machine runs a
+// corporate VPN client whose adapter is literally named "Centric Azure
+// VPN" alongside a real "Wi-Fi" adapter, and detectLocalCidr below needs
+// to prefer the latter. Not foolproof for every VPN client's naming
+// convention -- errs toward skipping a plausible non-LAN interface rather
+// than risking a scan of a VPN's own tunnel network by mistake.
+const VPN_INTERFACE_NAME_PATTERN = /vpn|tap|tun\d|ppp|wireguard|openvpn|zerotier|tailscale|wsl|docker|virtualbox|vmware|hyper-v/i;
+
+// Auto-detects a default subnet from this machine's own network
+// interfaces -- a real, already-known local computation (no external
+// lookup, nothing exposed beyond what the OS already hands any process on
+// this machine). `interfaces` is injectable (os.networkInterfaces() by
+// default) so tests can supply a fixed fake set instead of depending on
+// whatever's real on the machine running the tests.
+//
+// Skips internal (loopback) and non-IPv4 addresses, then prefers the
+// first candidate whose interface name doesn't look VPN-like -- a real
+// laptop often has both a LAN adapter and an active VPN client's own
+// virtual adapter at once, and auto-detecting the VPN's tunnel network
+// instead of the real LAN would silently produce a scan that finds
+// nothing useful, which is worse than not auto-detecting at all. Falls
+// back to the first candidate found if every one of them looks VPN-like,
+// rather than returning nothing -- a VPN-named LAN adapter is possible
+// even if unlikely, and *a* candidate beats none. Returns undefined only
+// when there's genuinely no non-internal IPv4 address to work with at
+// all.
+export function detectLocalCidr(interfaces = networkInterfaces()) {
+  const candidates = [];
+  for (const [interfaceName, addresses] of Object.entries(interfaces)) {
+    for (const addr of addresses ?? []) {
+      if (addr.family !== "IPv4" || addr.internal) continue;
+      candidates.push({ interfaceName, address: addr.address, netmask: addr.netmask });
+    }
+  }
+  if (candidates.length === 0) return undefined;
+
+  const preferred = candidates.find((c) => !VPN_INTERFACE_NAME_PATTERN.test(c.interfaceName)) ?? candidates[0];
+  const prefix = netmaskToPrefixLength(preferred.netmask);
+  const hostBits = 32 - prefix;
+  const networkInt = hostBits === 0 ? ipToInt(preferred.address) : (ipToInt(preferred.address) & ((0xffffffff << hostBits) >>> 0)) >>> 0;
+  return { cidr: `${intToIp(networkInt)}/${prefix}`, interfaceName: preferred.interfaceName };
 }
 
 // A reverse-PTR sweep of a subnet -- the only discovery mechanism plain

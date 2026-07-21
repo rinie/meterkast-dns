@@ -247,12 +247,17 @@ function startAddToPlaylist(row, cellEl) {
 // a text input next to the Scan button and appends its value as `?cidr=`
 // on the endpoint -- every other transport just omits this and scans
 // with no query string at all. `cidrDefaultEndpoint`, if set, is fetched
-// once to pre-fill that input with a real configured value (see
-// server.js's handleDnsDefaultCidr / METERKAST_DNS_CIDR) rather than
-// leaving only a placeholder hint -- a real LAN's own subnet doesn't
-// change scan to scan, so typing it every time is pure friction once it's
-// actually configured. No default set (or the fetch fails) just leaves
-// the placeholder as today; this is a convenience, never a requirement.
+// once to pre-fill that input with a real resolved value (see
+// server.js's handleDnsDefaultCidr -- METERKAST_DNS_CIDR, or an
+// auto-detected subnet) rather than leaving only a placeholder hint -- a
+// real LAN's own subnet doesn't change scan to scan, so typing it every
+// time is pure friction once it's actually resolved. The response's own
+// `source` is shown right next to the field (e.g. `(auto-detected from
+// "Wi-Fi")`) so an auto-detected value is never a silent guess -- the
+// same value a human typed and a value this code guessed both fill the
+// box, but only one of them says so. No default resolved (or the fetch
+// fails) just leaves the placeholder as before this existed; this is a
+// convenience, never a requirement.
 function mountDiscoverGrid(el, config) {
   let cidrInputEl;
   if (config.cidrInput) {
@@ -262,10 +267,15 @@ function mountDiscoverGrid(el, config) {
     cidrInputEl.className = "add-to-playlist-name";
     el.append(cidrInputEl);
     if (config.cidrDefaultEndpoint) {
+      const cidrSourceEl = document.createElement("span");
+      cidrSourceEl.className = "scan-status";
+      el.append(cidrSourceEl);
       fetch(config.cidrDefaultEndpoint)
         .then((res) => res.json())
-        .then(({ cidr }) => {
-          if (cidr) cidrInputEl.value = cidr;
+        .then(({ cidr, source }) => {
+          if (!cidr) return;
+          cidrInputEl.value = cidr;
+          cidrSourceEl.textContent = `(${source})`;
         })
         .catch(() => {}); // no configured default, or a transient failure -- the placeholder hint still works
     }

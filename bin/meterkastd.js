@@ -9,7 +9,7 @@ import dirigeraAdapter, { fetchDirigeraDevices, unclaimedDirigeraDevices } from 
 import ecowittAdapter from "../src/adapters/ecowitt-adapter.js";
 import smartbridgeAdapter, { fetchSmartbridgeDevices, unclaimedSmartbridgeDevices } from "../src/adapters/smartbridge-adapter.js";
 import mdnsAdapter from "../src/adapters/mdns-adapter.js";
-import dnsAdapter, { scanSubnet, unclaimedDnsCandidates } from "../src/adapters/dns-adapter.js";
+import dnsAdapter, { scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from "../src/adapters/dns-adapter.js";
 import { log } from "../src/core/log.js";
 
 const playlistPath =
@@ -60,19 +60,32 @@ for (const [transport, label, adapterFn] of pollingAdapters) {
 // Dirigera/Smartbridge are wired up because they already fetch their full
 // inventory in one bulk call, so "who's unclaimed" costs nothing extra.
 // DNS is wired up too, needing a `cidr` -- unlike a hub's own inventory
-// call, there's no *universal* default for "which subnet", but a real
-// LAN's own subnet doesn't change from scan to scan, so a real, optional
-// default lives in .env (METERKAST_DNS_CIDR, real-instance-specific
-// config, same reasoning DIRIGERA_HOSTNAME already follows -- not a
-// secret, but shouldn't be hardcoded into a committed file either): the
-// request's own `cidr` query param wins when present (a one-off different
-// subnet), the env default otherwise, and only an outright missing value
-// on both sides throws (surfaced as a 502 by handleDiscover). mDNS
-// discovery (browsing for arbitrary LAN devices, not resolving an
-// already-configured hostname) needs a different mechanism again
-// (DNS-SD's own meta-query) and is parked -- see README.md "Discovering
-// unclaimed devices".
-const dnsDefaultCidr = process.env.METERKAST_DNS_CIDR;
+// call, there's no *universal* default for "which subnet". Three-tier
+// fallback, most-specific wins: (1) the request's own `cidr` query param
+// (a one-off scan of a different subnet), (2) METERKAST_DNS_CIDR in .env
+// (real, instance-specific config the user set explicitly -- same
+// reasoning DIRIGERA_HOSTNAME already follows, not a secret but shouldn't
+// be hardcoded into a committed file), (3) detectLocalCidr's own
+// auto-detection from this machine's real network interfaces, preferring
+// a non-VPN one. Explicit always wins over guessed -- (2) overrides (3)
+// outright rather than merging them, and the source that actually won is
+// logged at startup and surfaced through GET /discover/dns/default-cidr
+// (see server.js), so an auto-detected default is never a silent guess.
+// Only a genuine absence on all three levels throws (surfaced as a 502 by
+// handleDiscover). mDNS discovery (browsing for arbitrary LAN devices,
+// not resolving an already-configured hostname) needs a different
+// mechanism again (DNS-SD's own meta-query) and is parked -- see
+// README.md "Discovering unclaimed devices".
+const autoDetectedCidr = detectLocalCidr();
+const dnsDefaultCidr = process.env.METERKAST_DNS_CIDR ?? autoDetectedCidr?.cidr;
+const dnsDefaultCidrSource = process.env.METERKAST_DNS_CIDR
+  ? "METERKAST_DNS_CIDR"
+  : autoDetectedCidr
+    ? `auto-detected from "${autoDetectedCidr.interfaceName}"`
+    : undefined;
+if (dnsDefaultCidr) {
+  log("info", `DNS discovery default subnet: ${dnsDefaultCidr} (${dnsDefaultCidrSource})`);
+}
 const discover = {
   dirigera: async () => {
     const hostname = process.env.DIRIGERA_HOSTNAME;
@@ -100,7 +113,7 @@ const discover = {
   },
 };
 
-const server = createServer(registry, displayFields, { playlistPath, discover, dnsDefaultCidr });
+const server = createServer(registry, displayFields, { playlistPath, discover, dnsDefaultCidr, dnsDefaultCidrSource });
 const port = Number(process.env.PORT ?? 8420);
 server.listen(port, () => {
   log("info", `meterkast-dns listening on http://localhost:${port}`);
