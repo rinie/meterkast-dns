@@ -10,6 +10,7 @@ import ecowittAdapter from "../src/adapters/ecowitt-adapter.js";
 import smartbridgeAdapter, { fetchSmartbridgeDevices, unclaimedSmartbridgeDevices } from "../src/adapters/smartbridge-adapter.js";
 import mdnsAdapter from "../src/adapters/mdns-adapter.js";
 import dnsAdapter, { scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from "../src/adapters/dns-adapter.js";
+import { listWindowsUsbDevices, unclaimedWindowsUsbDevices } from "../src/adapters/usb-windows-adapter.js";
 import { log } from "../src/core/log.js";
 
 const playlistPath =
@@ -72,9 +73,12 @@ for (const [transport, label, adapterFn] of pollingAdapters) {
 // logged at startup and surfaced through GET /discover/dns/default-cidr
 // (see server.js), so an auto-detected default is never a silent guess.
 // Only a genuine absence on all three levels throws (surfaced as a 502 by
-// handleDiscover). mDNS discovery (browsing for arbitrary LAN devices,
-// not resolving an already-configured hostname) needs a different
-// mechanism again (DNS-SD's own meta-query) and is parked -- see
+// handleDiscover). USB is wired up too, Windows-native via Get-PnpDevice
+// -- no native Node addon, matching this machine's own real constraint
+// (no build toolchain installed; see IMPLEMENTATION.md). mDNS discovery
+// (browsing for arbitrary LAN devices, not resolving an already-configured
+// hostname) needs a different mechanism again (DNS-SD's own meta-query)
+// and is parked -- see
 // README.md "Discovering unclaimed devices".
 const autoDetectedCidr = detectLocalCidr();
 const dnsDefaultCidr = process.env.METERKAST_DNS_CIDR ?? autoDetectedCidr?.cidr;
@@ -110,6 +114,14 @@ const discover = {
     }
     const scanResults = await scanSubnet(cidr);
     return unclaimedDnsCandidates(scanResults, recordsAsObject(registry));
+  },
+  // Windows-native (Get-PnpDevice, no node-gyp/native binding) -- see
+  // usb-windows-adapter.js. Throws its own clear "Windows-only" error on
+  // any other OS, surfaced as a 502 the same as any other discovery
+  // failure.
+  usb: async () => {
+    const pnpDevices = await listWindowsUsbDevices();
+    return unclaimedWindowsUsbDevices(pnpDevices, recordsAsObject(registry));
   },
 };
 

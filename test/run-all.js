@@ -18,3 +18,4 @@ import "./mdns.test.js";
 import "./dns-adapter.test.js";
 import "./log.test.js";
 import "./display-fields.test.js";
+import "./usb-windows-adapter.test.js";
