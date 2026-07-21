@@ -20,3 +20,4 @@ import "./log.test.js";
 import "./display-fields.test.js";
 import "./usb-windows-adapter.test.js";
 import "./bluetooth-windows-adapter.test.js";
+import "./esp32-proxy-adapter.test.js";

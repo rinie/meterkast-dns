@@ -1,0 +1,4 @@
+[
+  { "address": "aa:bb:cc:dd:ee:ff", "name": "Oven", "rssi": -62, "ageMs": 1200 },
+  { "address": "11:22:33:44:55:66", "rssi": -80, "ageMs": 30500 }
+]
