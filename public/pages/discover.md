@@ -81,3 +81,31 @@ WinRT call instead.) Windows-only.
 ```datatable
 {"discover": true, "endpoint": "/discover/bluetooth-nearby", "buttonLabel": "Scan Nearby Bluetooth (~30s)", "columns": ["suggestedName", "address"]}
 ```
+
+## mDNS (via proxy)
+
+Previously parked entirely -- this machine's own local mDNS is
+firewall-blocked outright, not just slow, so there was no way to browse
+at all. A [meterkast-proxy](https://github.com/rinie/meterkast-proxy)
+board on the same LAN does the actual browsing and exposes what it's seen
+as JSON; every proxy in `METERKAST_PROXY_HOSTS` (.env) is queried in
+parallel. Fails clearly if `METERKAST_PROXY_HOSTS` isn't set -- no silent
+empty result.
+
+```datatable
+{"discover": true, "endpoint": "/discover/mdns", "buttonLabel": "Scan mDNS (via proxy)", "columns": ["suggestedName", "address"]}
+```
+
+## Bluetooth (via proxy)
+
+A real NimBLE scan running on a
+[meterkast-proxy](https://github.com/rinie/meterkast-proxy) board --
+real MAC addresses, same as the Windows-native paths above, unlike
+WebBluetooth's deliberately opaque `device.id`. Useful when this laptop
+isn't near the device you're after, or alongside the Windows-native scans
+for a second vantage point. Also fails clearly if `METERKAST_PROXY_HOSTS`
+isn't set.
+
+```datatable
+{"discover": true, "endpoint": "/discover/bluetooth-proxy", "buttonLabel": "Scan Bluetooth (via proxy)", "columns": ["suggestedName", "address"]}
+```
