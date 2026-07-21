@@ -945,6 +945,28 @@ profile but not the same real Gutenberg address the native `noble`
 adapter's own MAC is; worth stating plainly since this is the *sole*
 identifier a freshly-discovered BLE playlist entry gets.
 
+USB discovery is server-side, real (not the WebUSB picker), and needs no
+native Node addon at all — `usb-windows-adapter.js` shells out to
+Windows' own `Get-PnpDevice`, the same information `lsusb` shows on
+Linux. This matters specifically because this project's own dev machine
+has no C++ build toolchain installed, and a real libusb-backed package
+(the `usb` npm package, say) would need one — this sidesteps that
+entirely, matching the standing preference to defer native-addon work
+(like `noble` for BLE) to a different machine rather than install a
+toolchain here. One physical device shows up as several separate PnP
+entries (once per interface/function, plus its own composite-device
+parent) — confirmed against this machine's real output: a single
+receiver produced 3 raw entries sharing one VID:PID — so
+`parsePnpDevices` dedupes by the same `"vvvv:pppp"` address convention
+WebUSB already uses in this project. Honest limit stated plainly: this
+lists *every* USB device Windows currently sees, not only the subset
+WebUSB could ever actually talk to — many are claimed by their own
+Windows class driver (HID, storage, printer, ...) and WebUSB categorically
+cannot open them regardless of playlist configuration; this only
+confirms a device with that VID:PID genuinely exists and is plugged in.
+Windows-only, and says so with a clear error on any other OS rather than
+failing silently or guessing.
+
 mDNS discovery (browsing for arbitrary LAN devices advertising over
 Bonjour, rather than resolving an already-configured hostname) is the one
 piece deliberately not built here — parked on this project's own

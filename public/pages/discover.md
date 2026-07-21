@@ -37,3 +37,20 @@ somewhere else.
 ```datatable
 {"discover": true, "endpoint": "/discover/dns", "buttonLabel": "Scan Subnet", "cidrInput": true, "cidrDefaultEndpoint": "/discover/dns/default-cidr", "columns": ["suggestedName", "address"]}
 ```
+
+## USB (Windows)
+
+An `lsusb`-equivalent for Windows -- every USB device Windows currently
+sees (`Get-PnpDevice`), no native Node addon and no build toolchain
+required. This lists real hardware, not just what WebUSB could reach:
+mice, hubs, printers, anything plugged in, regardless of which driver
+claimed it. Many of these are claimed by their own Windows class driver
+(HID, storage, printer, ...) and WebUSB categorically cannot open them no
+matter how the playlist entry is configured afterward -- this only
+confirms a device with this VID:PID is real and currently attached, the
+same as `lsusb` would. Windows-only; the scan fails clearly on any other
+OS.
+
+```datatable
+{"discover": true, "endpoint": "/discover/usb", "buttonLabel": "Scan USB Devices", "columns": ["suggestedName", "address"]}
+```

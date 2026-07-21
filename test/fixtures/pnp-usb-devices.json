@@ -1,0 +1,42 @@
+[
+  {
+    "InstanceId": "USB\\VID_046D&PID_C534&MI_00\\6&52F6029&0&0000",
+    "FriendlyName": "USB Input Device",
+    "Status": "OK"
+  },
+  {
+    "InstanceId": "USB\\VID_1BCF&PID_2BA5&MI_04\\6&398148B5&8&0004",
+    "FriendlyName": "APP Mode",
+    "Status": "OK"
+  },
+  {
+    "InstanceId": "USB\\VID_1BCF&PID_2BA5&MI_00\\6&398148B5&8&0000",
+    "FriendlyName": "Integrated Webcam",
+    "Status": "OK"
+  },
+  {
+    "InstanceId": "USB\\VID_1BCF&PID_2BA5\\01.00.00",
+    "FriendlyName": "USB Composite Device",
+    "Status": "OK"
+  },
+  {
+    "InstanceId": "USB\\VID_046D&PID_C534\\5&11E35775&0&3",
+    "FriendlyName": "USB Composite Device",
+    "Status": "OK"
+  },
+  {
+    "InstanceId": "USB\\VID_8087&PID_0033\\5&11E35775&0&10",
+    "FriendlyName": "Intel(R) Wireless Bluetooth(R)",
+    "Status": "OK"
+  },
+  {
+    "InstanceId": "USB\\VID_1BCF&PID_2BA5&MI_02\\6&398148B5&8&0002",
+    "FriendlyName": "Integrated IR Webcam",
+    "Status": "OK"
+  },
+  {
+    "InstanceId": "USB\\VID_046D&PID_C534&MI_01\\6&52F6029&0&0001",
+    "FriendlyName": "USB Input Device",
+    "Status": "OK"
+  }
+]

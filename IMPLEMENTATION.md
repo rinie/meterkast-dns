@@ -1049,6 +1049,46 @@ afterward and restarting confirmed the explicit value still wins outright
 over auto-detection — the startup log switched back to `(METERKAST_DNS_CIDR)`
 with no other change in behavior.
 
+**Next: "is a lsusb like feature possible on windows without node-gyp
+complexity?"** Yes — `Get-PnpDevice` (shelled out to via
+`child_process.execFile`) already gives Windows the same information
+`lsusb` shows on Linux, no native Node addon and no build toolchain
+needed. `usb-windows-adapter.js`'s `listWindowsUsbDevices` runs
+`Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -like
+'USB\VID_*' } | Select-Object InstanceId, FriendlyName, Status |
+ConvertTo-Json` and normalizes PowerShell's own single-object-vs-array
+`ConvertTo-Json` quirk. Run for real against this exact machine before
+writing any parsing code (not assumed): 8 raw entries came back for 3
+physical devices — a receiver, an integrated webcam, and Bluetooth —
+confirming `parsePnpDevices` needed to dedupe by `VID:PID` (one physical
+device produces one entry per interface/function plus its own
+composite-device parent). That real output became the test fixture
+(`test/fixtures/pnp-usb-devices.json`), not synthesized data.
+
+Wired into `bin/meterkastd.js`'s `discover.usb`, reusing the identical
+`POST /discover/:transport` route every other transport already has — no
+`server.js` changes needed at all, confirming the route was genuinely
+transport-agnostic as designed. `unclaimedWindowsUsbDevices` follows the
+same shape as every other transport's unclaimed-candidate function
+(`transport: "usb"`, the same `"vvvv:pppp"` address convention WebUSB
+already uses in this project, `suggestedName` from the device's own
+`FriendlyName`). Stated plainly, not left implicit: this lists every USB
+device Windows sees, not only the ones WebUSB could ever actually reach —
+most real devices are claimed by their own class driver and inaccessible
+to WebUSB no matter how the playlist entry is configured afterward.
+
+Tested against real infrastructure at two levels, same standard as every
+other adapter in this project: pure functions (`parsePnpDevices`,
+`unclaimedWindowsUsbDevices`) against the real captured fixture, and a
+real end-to-end test that actually spawns `powershell.exe` and asserts on
+whatever's genuinely plugged into the machine running the tests (skipped
+on non-Windows rather than mocked, since the feature itself is
+Windows-only) — took ~2.3s, real subprocess overhead, not a mock.
+Verified live through the full stack afterward: `POST /discover/usb`
+through the real running daemon returned the same 3 deduped devices in
+1.6s; `/screens/discover`'s new "USB (Windows)" panel rendered them
+correctly with working "Add to playlist" buttons in the real browser.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
