@@ -7,6 +7,14 @@
 // the playlist already, so one adapter covers both address shapes.
 import createMdns from "multicast-dns";
 import { log } from "../core/log.js";
+import { fetchProxyJson } from "./proxy-adapter.js";
+
+function slugify(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 // A DNS-SD service pattern looks like "_mqtt._tcp.local": service type,
 // protocol, domain. A plain hostname like "printer.local" has none of that
@@ -116,6 +124,84 @@ export async function resolveService(mdns, serviceName, { timeoutMs = 3000 } = {
   return { instanceName, host, port, txt };
 }
 
+// An alternate resolution mechanism for the exact same transport="mdns"
+// playlist entry, not a separate transport -- a setting on this adapter
+// (see mdnsAdapter's own `proxyUrl` option below), because this machine's
+// own Windows Firewall blocks node.exe's local multicast mDNS traffic
+// entirely (see README.md "Discovering unclaimed devices"). A proxy
+// board on the same LAN (any board running the small JSON contract in
+// the separate meterkast-esp32-proxy repo -- see proxy-adapter.js) has
+// no such restriction and can resolve on this daemon's behalf.
+//
+// The proxy's own /scan/mdns is a periodic browse-and-cache (see
+// meterkast-esp32-proxy's mdns_browser.cpp), not a targeted per-name
+// resolve -- so this looks up the requested address in whatever the
+// proxy most recently cached, rather than triggering a fresh query per
+// call the way local resolution does. A device whose service type isn't
+// in the proxy's own configured service-type list, or that simply hasn't
+// answered in the proxy's last query round, won't be found -- the same
+// honest "only shows what's real" limit GET /resolved already applies
+// elsewhere in this project, not a bug here. TXT records also aren't
+// part of the proxy's own JSON (a real, stated limitation on that side)
+// -- a service query resolved via proxy always gets back an empty txt
+// object, never fabricated data.
+export async function resolveViaProxy(proxyUrl, address) {
+  const entries = await fetchProxyJson(proxyUrl, "/scan/mdns");
+  if (isServiceQuery(address)) {
+    const serviceType = address.replace(/\.local\.?$/i, "");
+    const match = entries.find((entry) => entry.serviceType === serviceType);
+    if (!match) throw new Error(`mDNS via proxy ${proxyUrl}: no service instance found for ${address}`);
+    return { instanceName: match.hostname, host: match.ip, port: match.port, txt: {} };
+  }
+  const match = entries.find((entry) => entry.hostname === address);
+  if (!match) throw new Error(`mDNS via proxy ${proxyUrl}: no A or AAAA record found for ${address}`);
+  return { resolvedAddress: match.ip, family: "A" };
+}
+
+async function fetchMdnsFromProxy(proxyUrl) {
+  try {
+    return await fetchProxyJson(proxyUrl, "/scan/mdns");
+  } catch (error) {
+    log("warn", `mDNS proxy ${proxyUrl} unreachable: ${error.message}`);
+    return [];
+  }
+}
+
+// Discovery via the proxy -- the mDNS-browsing counterpart to
+// unclaimedDirigeraDevices/unclaimedWindowsUsbDevices/etc, and the piece
+// that's been parked all along: this machine could never browse mDNS
+// locally at all (not just resolve slowly -- blocked outright), so there
+// was no way to build this until a proxy could do the browsing instead.
+// Unlike resolveViaProxy above (one specific already-known device, one
+// proxy), discovery queries every configured proxy in parallel -- a
+// household might genuinely have boards covering different areas, and
+// "what's out there" should cover all of them, not just one.
+export async function discoverMdnsViaProxies(proxyUrls) {
+  const results = await Promise.all(proxyUrls.map(fetchMdnsFromProxy));
+  return proxyUrls.flatMap((url, i) => results[i].map((entry) => ({ ...entry, sourceProxy: url })));
+}
+
+export function unclaimedMdnsCandidates(proxyEntries, configuredRecords) {
+  const claimed = new Set(
+    Object.values(configuredRecords)
+      .filter((record) => record.transport === "mdns")
+      .map((record) => record.address),
+  );
+  const seen = new Set();
+  const candidates = [];
+  for (const entry of proxyEntries) {
+    if (claimed.has(entry.hostname) || seen.has(entry.hostname)) continue;
+    seen.add(entry.hostname);
+    candidates.push({
+      transport: "mdns",
+      address: entry.hostname,
+      suggestedName: slugify(entry.hostname.replace(/\.local\.?$/i, "")),
+      meta: { serviceType: entry.serviceType, ip: entry.ip, port: entry.port, sourceProxy: entry.sourceProxy },
+    });
+  }
+  return candidates;
+}
+
 // Polls every transport = "mdns" playlist entry on an interval and
 // re-resolves it, the same shape as every other polling adapter. `address`
 // stays the human-configured name (printer.local, _mqtt._tcp.local) --
@@ -126,18 +212,29 @@ export async function resolveService(mdns, serviceName, { timeoutMs = 3000 } = {
 // mqtt-broker's password_env) that this adapter doesn't itself manage --
 // upsertRecord fully replaces the stored record on every reading, so
 // without this a live mDNS update would silently wipe that field out.
-export default async function* mdnsAdapter(records, { intervalMs = 60000, timeoutMs = 3000 } = {}) {
+//
+// `proxyUrl`, when set, switches every target in this cycle over to
+// resolveViaProxy instead of local multicast -- a single daemon-level
+// setting, not a per-device choice: this machine's own local mDNS is
+// either blocked or it isn't, that's not something that varies device by
+// device, so one switch matches the real shape of the constraint. The
+// local `multicast-dns` instance is never even created when a proxy is
+// configured -- no point opening a multicast socket this daemon can't
+// use anyway.
+export default async function* mdnsAdapter(records, { intervalMs = 60000, timeoutMs = 3000, proxyUrl } = {}) {
   const targets = Object.entries(records).filter(([, record]) => record.transport === "mdns");
   if (targets.length === 0) return;
 
-  const mdns = createMdns();
+  const mdns = proxyUrl ? null : createMdns();
   try {
     while (true) {
       for (const [name, record] of targets) {
         try {
-          const resolved = isServiceQuery(record.address)
-            ? await resolveService(mdns, record.address, { timeoutMs })
-            : await resolveHostname(mdns, record.address, { timeoutMs });
+          const resolved = proxyUrl
+            ? await resolveViaProxy(proxyUrl, record.address)
+            : isServiceQuery(record.address)
+              ? await resolveService(mdns, record.address, { timeoutMs })
+              : await resolveHostname(mdns, record.address, { timeoutMs });
           yield { ...record, name, meta: resolved };
         } catch (error) {
           log("warn", `mDNS resolution failed for ${name}: ${error.message}`);
@@ -146,6 +243,6 @@ export default async function* mdnsAdapter(records, { intervalMs = 60000, timeou
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
   } finally {
-    mdns.destroy();
+    mdns?.destroy();
   }
 }

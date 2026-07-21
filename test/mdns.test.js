@@ -1,7 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import createMdns from "multicast-dns";
-import { isServiceQuery, decodeTxt, resolveHostname, resolveService } from "../src/adapters/mdns-adapter.js";
+import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import mdnsAdapter, {
+  isServiceQuery,
+  decodeTxt,
+  resolveHostname,
+  resolveService,
+  resolveViaProxy,
+  discoverMdnsViaProxies,
+  unclaimedMdnsCandidates,
+} from "../src/adapters/mdns-adapter.js";
+
+const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
 test("isServiceQuery recognizes DNS-SD service patterns", () => {
   assert.equal(isServiceQuery("_mqtt._tcp.local"), true);
@@ -152,5 +166,135 @@ test("resolveService rejects with a clear error when no PTR answer comes back", 
     );
   } finally {
     resolver.destroy();
+  }
+});
+
+// Real local plain-HTTP server standing in for a real meterkast proxy
+// board -- same pattern proxy-adapter.test.js uses for its own BLE
+// round trips, reused here for mDNS-via-proxy resolution/discovery.
+function startFakeProxyServer(routes) {
+  return new Promise((resolveReady) => {
+    const server = createServer((req, res) => {
+      const body = routes[req.url];
+      if (body === undefined) {
+        res.writeHead(404).end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    });
+    server.listen(0, "127.0.0.1", () => resolveReady(server));
+  });
+}
+
+async function loadProxyMdnsFixture() {
+  return JSON.parse(await readFile(join(FIXTURES_DIR, "proxy-mdns-scan.json"), "utf8"));
+}
+
+test("resolveViaProxy resolves a plain hostname from the proxy's own cached /scan/mdns", async () => {
+  const fixture = await loadProxyMdnsFixture();
+  const server = await startFakeProxyServer({ "/scan/mdns": fixture });
+  const { port } = server.address();
+  const proxyUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const result = await resolveViaProxy(proxyUrl, "homeassistant.local");
+    assert.deepEqual(result, { resolvedAddress: "192.168.1.50", family: "A" });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("resolveViaProxy resolves a service query by matching serviceType, txt always empty (not part of the proxy's own JSON)", async () => {
+  const fixture = await loadProxyMdnsFixture();
+  const server = await startFakeProxyServer({ "/scan/mdns": fixture });
+  const { port } = server.address();
+  const proxyUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const result = await resolveViaProxy(proxyUrl, "_googlecast._tcp.local");
+    assert.deepEqual(result, { instanceName: "chromecast-abcd.local", host: "192.168.1.60", port: 8009, txt: {} });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("resolveViaProxy rejects with a clear error when the proxy's cache has nothing for that address", async () => {
+  const server = await startFakeProxyServer({ "/scan/mdns": [] });
+  const { port } = server.address();
+  const proxyUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    await assert.rejects(resolveViaProxy(proxyUrl, "nobody.local"), /no A or AAAA record found for nobody\.local/);
+    await assert.rejects(resolveViaProxy(proxyUrl, "_nobody._tcp.local"), /no service instance found for _nobody\._tcp\.local/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("discoverMdnsViaProxies flattens results from multiple proxies, tagging each entry with its source", async () => {
+  const fixture = await loadProxyMdnsFixture();
+  const server = await startFakeProxyServer({ "/scan/mdns": fixture });
+  const { port } = server.address();
+  const proxyUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const entries = await discoverMdnsViaProxies([proxyUrl]);
+    assert.equal(entries.length, 2);
+    assert.ok(entries.every((entry) => entry.sourceProxy === proxyUrl));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("discoverMdnsViaProxies isolates an unreachable proxy -- one offline board doesn't fail the others", async () => {
+  const entries = await discoverMdnsViaProxies(["http://127.0.0.1:1"]);
+  assert.deepEqual(entries, []);
+});
+
+test("unclaimedMdnsCandidates uses transport 'mdns' (not a separate transport), excludes an already-claimed hostname", async () => {
+  const fixture = await loadProxyMdnsFixture();
+  const entries = fixture.map((entry) => ({ ...entry, sourceProxy: "http://proxy-a" }));
+  const configuredRecords = {
+    "living-room-hub": { transport: "mdns", address: "homeassistant.local" },
+  };
+
+  const candidates = unclaimedMdnsCandidates(entries, configuredRecords);
+
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(candidates[0], {
+    transport: "mdns",
+    address: "chromecast-abcd.local",
+    suggestedName: "chromecast-abcd",
+    meta: { serviceType: "_googlecast._tcp", ip: "192.168.1.60", port: 8009, sourceProxy: "http://proxy-a" },
+  });
+});
+
+test("unclaimedMdnsCandidates dedupes the same hostname seen by more than one proxy", () => {
+  const entries = [
+    { serviceType: "_home-assistant._tcp", hostname: "homeassistant.local", ip: "192.168.1.50", port: 8123, sourceProxy: "http://proxy-a" },
+    { serviceType: "_home-assistant._tcp", hostname: "homeassistant.local", ip: "192.168.1.50", port: 8123, sourceProxy: "http://proxy-b" },
+  ];
+  const candidates = unclaimedMdnsCandidates(entries, {});
+  assert.equal(candidates.length, 1);
+});
+
+test("mdnsAdapter uses resolveViaProxy for every target and never opens a local multicast socket when proxyUrl is set", async () => {
+  const fixture = await loadProxyMdnsFixture();
+  const server = await startFakeProxyServer({ "/scan/mdns": fixture });
+  const { port } = server.address();
+  const proxyUrl = `http://127.0.0.1:${port}`;
+
+  const records = { "living-room-hub": { transport: "mdns", address: "homeassistant.local" } };
+  const generator = mdnsAdapter(records, { intervalMs: 5, proxyUrl });
+
+  try {
+    const { value, done } = await generator.next();
+    assert.equal(done, false);
+    assert.equal(value.name, "living-room-hub");
+    assert.deepEqual(value.meta, { resolvedAddress: "192.168.1.50", family: "A" });
+  } finally {
+    await generator.return();
+    await new Promise((resolve) => server.close(resolve));
   }
 });

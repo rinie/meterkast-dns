@@ -4,26 +4,16 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  parseProxyHosts,
-  discoverBleViaProxies,
-  discoverMdnsViaProxies,
-  unclaimedProxyBleDevices,
-  unclaimedProxyMdnsDevices,
-} from "../src/adapters/esp32-proxy-adapter.js";
+import { parseProxyHosts, discoverBleViaProxies, unclaimedProxyBleDevices } from "../src/adapters/proxy-adapter.js";
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
 async function loadBleFixture() {
-  return JSON.parse(await readFile(join(FIXTURES_DIR, "esp32-proxy-ble-scan.json"), "utf8"));
+  return JSON.parse(await readFile(join(FIXTURES_DIR, "proxy-ble-scan.json"), "utf8"));
 }
 
-async function loadMdnsFixture() {
-  return JSON.parse(await readFile(join(FIXTURES_DIR, "esp32-proxy-mdns-scan.json"), "utf8"));
-}
-
-// Real local plain-HTTP server standing in for a real meterkast-esp32-proxy
-// board -- the firmware's own webserver is plain HTTP, not HTTPS (see
+// Real local plain-HTTP server standing in for a real proxy board -- the
+// firmware's own webserver is plain HTTP, not HTTPS (see
 // meterkast-esp32-proxy/src/web_server.cpp), so this is the honest
 // equivalent of the self-signed-HTTPS-server pattern dirigera.test.js/
 // smartbridge.test.js already use for their own real HTTP round trips.
@@ -82,20 +72,6 @@ test("discoverBleViaProxies isolates an unreachable proxy -- one offline board d
   }
 });
 
-test("discoverMdnsViaProxies fetches a real local proxy's /scan/mdns", async () => {
-  const mdnsFixture = await loadMdnsFixture();
-  const server = await startFakeProxyServer({ "/scan/mdns": mdnsFixture });
-  const { port } = server.address();
-  const baseUrl = `http://127.0.0.1:${port}`;
-
-  try {
-    const results = await discoverMdnsViaProxies([baseUrl]);
-    assert.deepEqual(results, { [baseUrl]: mdnsFixture });
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-  }
-});
-
 test("unclaimedProxyBleDevices uppercases the address, excludes an already-claimed one, tags the source proxy", async () => {
   const bleFixture = await loadBleFixture();
   const rawByProxy = { "http://proxy-a": bleFixture };
@@ -123,33 +99,4 @@ test("unclaimedProxyBleDevices suggests a slugified name when the device adverti
 
   assert.equal(candidates[0].suggestedName, "oven");
   assert.equal(candidates[0].address, "AA:BB:CC:DD:EE:FF");
-});
-
-test("unclaimedProxyMdnsDevices uses transport 'mdns-proxy', not 'mdns' -- claiming it as plain mdns would hand it back to the locally-blocked resolver", async () => {
-  const mdnsFixture = await loadMdnsFixture();
-  const rawByProxy = { "http://proxy-a": mdnsFixture };
-
-  const candidates = unclaimedProxyMdnsDevices(rawByProxy, {});
-
-  assert.equal(candidates.length, 2);
-  assert.ok(candidates.every((c) => c.transport === "mdns-proxy"));
-  assert.deepEqual(candidates[0], {
-    transport: "mdns-proxy",
-    address: "homeassistant.local",
-    suggestedName: "homeassistant",
-    meta: { serviceType: "_home-assistant._tcp", ip: "192.168.1.50", port: 8123, sourceProxy: "http://proxy-a" },
-  });
-});
-
-test("unclaimedProxyMdnsDevices excludes a hostname already claimed as transport 'mdns-proxy'", async () => {
-  const mdnsFixture = await loadMdnsFixture();
-  const rawByProxy = { "http://proxy-a": mdnsFixture };
-  const configuredRecords = {
-    "living-room-hub": { transport: "mdns-proxy", address: "homeassistant.local" },
-  };
-
-  const candidates = unclaimedProxyMdnsDevices(rawByProxy, configuredRecords);
-
-  assert.equal(candidates.length, 1);
-  assert.equal(candidates[0].address, "chromecast-abcd.local");
 });
