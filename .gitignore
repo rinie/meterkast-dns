@@ -5,3 +5,11 @@ node_modules/
 device-playlist.toml
 backups/
 .env
+
+# matter.js's own fabric/session/crypto storage -- real credential-grade
+# state, not just config, unlike everything else above. Defaults to
+# %APPDATA%/.matter (or ~/.matter) outside the repo entirely; this
+# project points it here instead via MATTER_PATH_ROOT in .env so it's at
+# least visible/removable alongside everything else, but it still must
+# never be committed.
+.matter-storage/
