@@ -24,6 +24,7 @@
 // same "unverified sketch" treatment meterkast-proxy's firmware once
 // had.
 import { Environment } from "@matter/main";
+import { ManualPairingCodeCodec } from "@matter/main/types";
 import { CommissioningController } from "@project-chip/matter.js";
 
 let controllerPromise;
@@ -50,12 +51,31 @@ function getController() {
 // discoveryCapabilities.ble is hardcoded false -- not exposed as an
 // option on this function at all, so there's no call site that could
 // accidentally turn BLE on.
-export async function commissionMatterDevice({ longDiscriminator, shortDiscriminator, setupPin, knownAddress }) {
+//
+// pairingCode is the 11-digit manual pairing code most apps show you
+// (e.g. Dirigera's own "Create Matter Bridge" flow) -- decoded via
+// matter.js's own ManualPairingCodeCodec rather than asking a caller to
+// split it into discriminator+passcode by hand. Takes precedence over
+// separately-provided longDiscriminator/shortDiscriminator/setupPin if
+// both are somehow given.
+export async function commissionMatterDevice({
+  pairingCode,
+  longDiscriminator,
+  shortDiscriminator,
+  setupPin,
+  knownAddress,
+}) {
+  if (pairingCode !== undefined) {
+    const decoded = ManualPairingCodeCodec.decode(pairingCode);
+    shortDiscriminator = decoded.shortDiscriminator;
+    setupPin = decoded.passcode;
+  }
+
   if (longDiscriminator === undefined && shortDiscriminator === undefined) {
-    throw new Error("commissionMatterDevice needs a longDiscriminator or a shortDiscriminator");
+    throw new Error("commissionMatterDevice needs a pairingCode, or a longDiscriminator/shortDiscriminator");
   }
   if (setupPin === undefined) {
-    throw new Error("commissionMatterDevice needs setupPin (the device's setup passcode)");
+    throw new Error("commissionMatterDevice needs setupPin (the device's setup passcode) or a pairingCode");
   }
 
   const controller = await getController();
