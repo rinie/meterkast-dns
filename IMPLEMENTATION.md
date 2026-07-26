@@ -1267,15 +1267,48 @@ the real finding: Dirigera's own REST API (`fetchDirigeraDevices`) lists
 one of them. Bridging a device to Matter is evidently an explicit,
 separate, per-device step in the IKEA app, not automatic for everything
 Dirigera already manages — a genuine coverage difference, not a bug in
-either adapter. (Working hypothesis, not yet confirmed: the un-bridged
-devices are almost all IKEA's older **TRADFRI**-line products — motion
-sensors, bulbs, outlets, remotes, the bulk of the 23 seen earlier this
-session via `fetchDirigeraDevices` — while VALLHORN/PARASOLL/BADRING/
-STOFTMOLN/VINDSTYRKA belong to IKEA's newer "smart products" lineup.
-TRADFRI predates Matter's 2022 launch entirely, so it would be
-unsurprising if older TRADFRI hardware simply can't be bridged to
-Matter at all, regardless of app configuration. Worth confirming
-directly in the IKEA app before treating this as settled.)
+either adapter.
+
+The earlier TRADFRI-vs-newer-lineup hypothesis was checked for real:
+every device's `model`/`productCode` from `fetchDirigeraDevices`'s raw
+output was researched individually (product manuals, `zigbee.blakadder.com`,
+and the Connectivity Standards Alliance's own certified-product database
+at `csa-iot.org`, the authoritative source for an actual Matter
+certification rather than marketing copy), not assumed from the product
+line name alone:
+
+| Model | Code | Count | Matter? |
+|---|---|---|---|
+| TRÅDFRI motion sensor | E1745 | 5 | No — Zigbee-only |
+| TRÅDFRI motion sensor | E1525 | 1 | No — Zigbee-only |
+| TRÅDFRI control outlet | E1603 | 2 | No — Zigbee 3.0 certified, no Matter cert found |
+| TRÅDFRI on/off switch | E1743 | 1 | No — Zigbee-only |
+| TRÅDFRI remote control | E1524 | 1 | No — Zigbee-only |
+| TRÅDFRI Signal Repeater | E1746 | 1 | No — Zigbee-only |
+| TRÅDFRI Driver 10W/30W | ICPSHC24… | 2 | No — Zigbee-only (non-smart fixture drivers) |
+| TRÅDFRI bulb (2 variants) | LED16… | 2 | No — Zigbee-only |
+| RODRET Dimmer | E2201 | 1 | No — Matter only via Dirigera-as-bridge, not native |
+| **VALLHORN Motion Sensor** | E2134 | 2 | **Yes** — native Matter-over-Thread, real CSA-IOT certificate |
+| **VINDSTYRKA** | E2112 | 1 | **Yes** — real CSA-IOT certificate |
+| PARASOLL Door/Window Sensor | E2013 | 1 | Likely yes — launched alongside VALLHORN as the same Thread/Matter sensor wave, not independently certificate-confirmed |
+| BADRING Water Leakage Sensor | E2202 | 1 | Unclear — no Matter mention found anywhere |
+| STOFTMOLN lamp | T2035 | 1 | Ambiguous — has a real CSA-IOT Matter certificate, but sources describe the currently-sold hardware as still Zigbee-only |
+| DIRIGERA Hub | — | 1 | Yes — confirmed via its own `matterControllerEnabled: true` `dynamicFeatures` entry |
+
+The real split isn't "TRADFRI vs. everything else" as first guessed — it's
+specifically IKEA's **older numbered TRÅDFRI/RODRET line (all
+Zigbee-only)** versus their **newer 2023+ named sensor line**
+(VALLHORN/VINDSTYRKA confirmed, PARASOLL likely) that ships with native
+Thread radios. That puts roughly **4–5 of the 23 devices** on genuinely
+Matter-capable hardware — but the Matter bridge still exposes only
+**1**. The gap between "hardware capable" and "actually bridged" is the
+real number: even among the Matter-capable devices, only one has been
+switched on in the app's Matter Bridge configuration screen. Capability
+and exposure are two separate facts, and this hub's raw REST output
+(confirmed by grepping the full JSON dump for `matter`, case-insensitive
+— one hit, the hub's own controller flag, nothing per-device) has no way
+to tell you which is which; only the Matter side (`partsCount`) or the
+app itself can.
 
 **The comparison, in short:** `dirigera-adapter.js` is one HTTPS request
 plus a `JSON.parse`, no new dependencies, no persistent state, all 23
