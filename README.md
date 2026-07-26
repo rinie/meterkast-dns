@@ -571,6 +571,44 @@ See IMPLEMENTATION.md for what's verified here versus BLE's honest gap —
 this one goes further, since a self-signed HTTPS server is fully fakeable
 in a test without needing the real hardware.
 
+### Matter, direct — measuring the ceremony §1 described
+
+§1 called Matter a **Def-Push resolver that still fails the user** rather
+than a real one, without putting a number on how much that costs to work
+with directly. `matter-adapter.js` exists to measure it, not to replace
+the Dirigera path above — Dirigera's own REST API stays the recommended
+way to reach a device that's already on it. The comparison target is the
+same physical hub both ways: Dirigera itself, commissioned as a Matter
+node via its own "Create Matter Bridge" flow in the IKEA app.
+
+| | `dirigera-adapter.js` | `matter-adapter.js` |
+|---|---|---|
+| New dependencies | none (built-in `https`) | 3 packages, 10 total — deliberately excluding `@matter/nodejs-ble`, which wraps the same `noble`/`bleno` native binding this project already removed once |
+| Per-request state | one bearer token in `.env` | a persistent local fabric/certificate store — a new *category* of state this project didn't have before, more sensitive than any single credential (see below) |
+| To reach a device | one HTTPS `GET` | a real PASE handshake — password-authenticated key exchange, X.509 certificate exchange, device attestation, a CSR, a certificate install |
+| Devices seen on this hub | all 23 | 1 (see IMPLEMENTATION.md — bridging to Matter looks like an explicit, separate, per-device step in the app, not automatic) |
+| Where the implementation came from | Dirigera's own documented REST endpoint | reading matter.js's real TypeScript source across four packages to find the right calls at all |
+
+The commissioning storage point is worth being concrete about: it isn't
+just "another `.env` value." matter.js defaults to writing fabric keys
+and node certificates to `%APPDATA%/.matter`, outside this repo
+entirely; this project points it at a gitignored `.matter-storage/`
+instead (`MATTER_PATH_ROOT` in `.env`), same "never committed" treatment
+as everything else — but if it ever leaked, it's enough to impersonate
+meterkast-dns's own identity on Dirigera's fabric, not just read one
+hub's device list the way a leaked bearer token would.
+
+None of this is Matter being badly built — the PASE/attestation chain is
+real security work solving a real problem (proving a controller and a
+device should trust each other with no prior relationship). It's the
+concrete shape of the "ceremony" §1 named: real cryptographic protocol
+work, a new class of local secret to protect, and a whole second npm
+dependency tree, to reach a device that Dirigera's own REST API already
+serves in one HTTPS call with a bearer token it already had. See
+IMPLEMENTATION.md for the full verification log — the real PASE/NOC
+message trace, the exact dependency versions confirmed against the npm
+registry, and the specific mDNS-firewall wall this hit along the way.
+
 ### Extending to cloud vendor APIs (Ecowitt, Smartbridge/ICS2000) — and their honest limits
 
 Worth naming plainly rather than blurring together: these two are a real
