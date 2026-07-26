@@ -11,6 +11,7 @@ import smartbridgeAdapter, { fetchSmartbridgeDevices, unclaimedSmartbridgeDevice
 import mdnsAdapter, { discoverMdnsViaProxies, unclaimedMdnsCandidates } from "../src/adapters/mdns-adapter.js";
 import dnsAdapter, { scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from "../src/adapters/dns-adapter.js";
 import { parseProxyHosts, discoverBleViaProxies, unclaimedProxyBleDevices } from "../src/adapters/proxy-adapter.js";
+import matterAdapter from "../src/adapters/matter-adapter.js";
 import { listWindowsUsbDevices, unclaimedWindowsUsbDevices } from "../src/adapters/usb-windows-adapter.js";
 import {
   listWindowsPairedBluetoothDevices,
@@ -65,6 +66,7 @@ const pollingAdapters = [
   ["smartbridge", "Smartbridge", smartbridgeAdapter, {}],
   ["mdns", "mDNS", mdnsAdapter, proxyUrls.length > 0 ? { proxyUrl: proxyUrls[0] } : {}],
   ["dns", "DNS", dnsAdapter, {}],
+  ["matter", "Matter", matterAdapter, {}],
 ];
 for (const [transport, label, adapterFn, options] of pollingAdapters) {
   runPollingAdapter(registry, transport, adapterFn, options).catch((error) => {

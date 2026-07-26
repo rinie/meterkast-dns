@@ -32,8 +32,10 @@
 // discriminator-only discovery (no knownAddress) would likely hit the
 // same wall even earlier, at the initial PASE step.
 import { Environment } from "@matter/main";
-import { ManualPairingCodeCodec } from "@matter/main/types";
+import { BasicInformationCluster, Descriptor } from "@matter/main/clusters";
+import { ManualPairingCodeCodec, NodeId } from "@matter/main/types";
 import { CommissioningController } from "@project-chip/matter.js";
+import { log } from "../core/log.js";
 
 let controllerPromise;
 
@@ -97,4 +99,64 @@ export async function commissionMatterDevice({
     passcode: setupPin,
   });
   return nodeId;
+}
+
+// Read-only: this project's registry treats a commissioned Matter node as
+// one record (the same coarse granularity dirigera-adapter.js already
+// gives Dirigera itself -- its own "gateway" deviceType record, not a
+// breakdown of every bulb behind it). Reading every bridged endpoint
+// individually (Dirigera-as-bridge exposes one Matter endpoint per
+// underlying IKEA device) is a real, larger follow-up, not this PR --
+// see the plan.
+//
+// Root-endpoint BasicInformation + Descriptor only, matching what the
+// real matter.js controller example itself demonstrates as the
+// "preferred way to access... cluster data" -- getRootClusterClient
+// reads are real remote calls the first time, then served from
+// matter.js's own local cache once subscribed (node.connect() below
+// subscribes to everything by default).
+export async function fetchMatterDeviceState(nodeId) {
+  const controller = await getController();
+  const node = await controller.getNode(nodeId);
+
+  if (!node.isConnected) node.connect();
+  if (!node.initialized) await node.events.initialized;
+
+  const meta = { partsCount: node.parts.size };
+
+  const info = node.getRootClusterClient(BasicInformationCluster);
+  if (info) {
+    meta.vendorName = await info.getVendorNameAttribute();
+    meta.productName = await info.getProductNameAttribute();
+    meta.softwareVersion = await info.getSoftwareVersionStringAttribute();
+  }
+
+  const descriptor = node.getRootClusterClient(Descriptor.Complete);
+  if (descriptor) {
+    meta.deviceTypeList = await descriptor.getDeviceTypeListAttribute();
+  }
+
+  return meta;
+}
+
+// Standard polling-adapter generator shape, matching mdns-adapter.js/
+// dns-adapter.js -- address is the Matter nodeId (a stable identifier
+// once commissioned, the natural "how do we find this again" key for a
+// transport whose actual connection details live in matter.js's own
+// persisted storage, not in the playlist).
+export default async function* matterAdapter(records, { intervalMs = 60000 } = {}) {
+  const targets = Object.entries(records).filter(([, record]) => record.transport === "matter");
+  if (targets.length === 0) return;
+
+  while (true) {
+    for (const [name, record] of targets) {
+      try {
+        const meta = await fetchMatterDeviceState(NodeId(record.address));
+        yield { ...record, name, meta };
+      } catch (error) {
+        log("warn", `Matter state read failed for ${name}: ${error.message}`);
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
