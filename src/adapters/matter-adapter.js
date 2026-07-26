@@ -16,14 +16,23 @@
 // with discoveryCapabilities.ble simply left false -- no BLE package
 // needs to be installed or imported at all.
 //
-// UNVERIFIED as of this commit: written and grounded against the real
-// installed matter.js source (types, method signatures, dependency
-// versions all confirmed live, not guessed), but not yet commissioned
-// against a real owned Matter device -- no such device was available at
-// the time this was written. Real-verify before relying on this, the
-// same "unverified sketch" treatment meterkast-proxy's firmware once
-// had.
+// Real-verified: commissioned an actual IKEA Dirigera hub exposed as a
+// Matter bridge (IKEA Home Smart app -> Integrations -> Matter Bridge)
+// via a real pairing code, using knownAddress to skip discovery. Full
+// PASE handshake, device attestation, NOC install, and an automatic
+// subscription to the bridge's endpoint state all completed for real.
+//
+// One real finding worth keeping in mind: this laptop's own local mDNS
+// is firewall-blocked for node.exe (see the meterkast-proxy README) --
+// matter.js runs its own internal mDNS, entirely separate from this
+// project's mdns-adapter.js/proxy setup, and that got stuck specifically
+// on the post-commissioning operational reconnect (which has no
+// knownAddress override) when run on this machine. The full flow only
+// completed when run from a second machine without that firewall rule.
+// discriminator-only discovery (no knownAddress) would likely hit the
+// same wall even earlier, at the initial PASE step.
 import { Environment } from "@matter/main";
+import { ManualPairingCodeCodec } from "@matter/main/types";
 import { CommissioningController } from "@project-chip/matter.js";
 
 let controllerPromise;
@@ -50,12 +59,31 @@ function getController() {
 // discoveryCapabilities.ble is hardcoded false -- not exposed as an
 // option on this function at all, so there's no call site that could
 // accidentally turn BLE on.
-export async function commissionMatterDevice({ longDiscriminator, shortDiscriminator, setupPin, knownAddress }) {
+//
+// pairingCode is the 11-digit manual pairing code most apps show you
+// (e.g. Dirigera's own "Create Matter Bridge" flow) -- decoded via
+// matter.js's own ManualPairingCodeCodec rather than asking a caller to
+// split it into discriminator+passcode by hand. Takes precedence over
+// separately-provided longDiscriminator/shortDiscriminator/setupPin if
+// both are somehow given.
+export async function commissionMatterDevice({
+  pairingCode,
+  longDiscriminator,
+  shortDiscriminator,
+  setupPin,
+  knownAddress,
+}) {
+  if (pairingCode !== undefined) {
+    const decoded = ManualPairingCodeCodec.decode(pairingCode);
+    shortDiscriminator = decoded.shortDiscriminator;
+    setupPin = decoded.passcode;
+  }
+
   if (longDiscriminator === undefined && shortDiscriminator === undefined) {
-    throw new Error("commissionMatterDevice needs a longDiscriminator or a shortDiscriminator");
+    throw new Error("commissionMatterDevice needs a pairingCode, or a longDiscriminator/shortDiscriminator");
   }
   if (setupPin === undefined) {
-    throw new Error("commissionMatterDevice needs setupPin (the device's setup passcode)");
+    throw new Error("commissionMatterDevice needs setupPin (the device's setup passcode) or a pairingCode");
   }
 
   const controller = await getController();
