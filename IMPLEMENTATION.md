@@ -1162,6 +1162,134 @@ verified end to end for a transport that has never once, anywhere in
 this project's history, produced a real Bluetooth MAC through automated
 discovery before this.
 
+**`matter-adapter.js`: a direct matter.js controller, built specifically
+to measure the real complexity of speaking Matter directly against
+Dirigera's own REST API for the same physical hub — not to replace it.**
+Dirigera itself was commissioned as the test target, exposed as a Matter
+bridge via the IKEA Home Smart app's own "Create Matter Bridge" flow —
+real end-to-end verification against production hardware, the same
+standard every other adapter here holds to.
+
+Dependency footprint, confirmed against the real npm registry before
+installing anything (`npm view @matter/main version` etc., not assumed):
+`@matter/main`, `@matter/nodejs`, and `@project-chip/matter.js`, all
+`0.17.6`, pulling in 10 packages total. `@matter/nodejs-ble` — the
+official BLE package, confirmed by reading its real source
+(`NobleBleClient.ts`/`NobleBleChannel.ts`) to wrap `@abandonware/noble` +
+`bleno` — was deliberately never installed. That's the same native
+`node-gyp` binding this project already tore out once in favor of
+WebBLE/WebUSB; a real `npm install` here pulled zero native binaries,
+confirmed by checking for `*.node` files afterward. matter.js's own
+`Ble`/`Central`/`Scanner` interfaces support commissioning without it at
+all (`discoveryCapabilities: { ble: false }` plus either a
+`knownAddress` or a discriminator+passcode) — confirmed by reading the
+real installed `@project-chip/matter.js` TypeScript source directly
+(`CommissioningController.ts`), not the compiled output and not guessed,
+the same discipline that caught `MDNS.address()` as wrong for ESPmDNS
+earlier in this session.
+
+**Storage is a genuinely new category of state for this project.**
+Every other adapter's credential is one value in `.env` (a bearer token,
+an API key) — stateless per request. matter.js instead needs real,
+persistent, credential-grade storage: fabric keys, node certificates,
+session data. It defaults to `%APPDATA%/.matter` on Windows, outside the
+repo entirely — traced to `NodeJsEnvironment.ts`'s real default-root
+logic, not documentation. Overridden via `MATTER_PATH_ROOT=./.matter-storage`
+in `.env` (the library reads `MATTER_*` environment variables directly,
+confirmed in `VariableService.ts`), landing in a gitignored directory
+alongside `device-playlist.toml`/`.env` — same "personal, never
+committed" treatment, but a materially bigger blast radius if it ever
+leaked: this is enough to impersonate meterkast-dns's own admin identity
+on the fabric, not just read one hub's device list.
+
+**The commissioning flow itself is real, deep protocol work — verified
+by reading the actual message-level debug log, not just checking for a
+success return value.** A real PASE (Password-Authenticated Session
+Establishment) handshake completed: `PBKDFParamRequest`, real X.509
+certificate exchange (Dirigera's actual PAI certificate came back,
+literally carrying the common name `DIRIGERA Hub for smart products`,
+chained to an `IKEA of Sweden` CA), device attestation verification,
+a CSR, a trusted-root-certificate install, and a Node Operational
+Certificate (NOC) install (`fabricIndex: 1`) — meterkast-dns now has a
+real admin identity on Dirigera's own Matter fabric. None of this has an
+equivalent on the Dirigera-REST side, which is just an HTTPS request with
+a bearer token in the header.
+
+**One real technical wall, hit twice, that has nothing to do with
+Matter's own complexity and everything to do with this specific
+laptop:** matter.js runs its own internal mDNS implementation, entirely
+separate from this project's own `mdns-adapter.js`/proxy machinery —
+confirmed by watching it bind its own multicast sockets directly during
+a live run. The primary laptop's known `node.exe` mDNS firewall block
+(already documented for this project's own local mDNS) hit it too, but
+in a specific, narrower spot than expected: `knownAddress` successfully
+bypasses discovery for the *initial* PASE connection, but the *final*
+step (reconnecting over the new operational/CASE session to finish
+commissioning) has no equivalent override and resolves the device via
+mDNS regardless — that step hung indefinitely on this laptop. The full
+flow completed cleanly, first attempt, when run from the second
+(toolchain) laptop, which has no such firewall rule — commissioning
+itself was never the problem.
+
+One real, purely self-inflicted bug along the way, worth recording
+because it looked like a network problem at first: passing the target IP
+through cmd.exe as `set DIRIGERA_HOSTNAME=192.168.1.183 && node ...`
+picked up a trailing space before `&&` as part of the value (a
+well-known cmd.exe `set` gotcha), producing a malformed
+`udp://192.168.1.183 :5540` address and an immediate, misleading
+"unreachable" failure. Hardcoding the value directly in the test script
+instead of round-tripping it through a `set`-then-`&&` cmd.exe line fixed
+it. A small thing, but a real example of how much lower-level plumbing
+this path exposes you to versus one `fetch()` call.
+
+**Reading data back is real and live, and surfaced a genuine coverage
+gap.** `fetchMatterDeviceState` reads a commissioned node's root
+`BasicInformation`/`Descriptor` clusters via `getRootClusterClient` — the
+pattern matter.js's own maintained `examples/controller/src/ControllerNode.ts`
+demonstrates as preferred, confirmed by reading that file directly rather
+than inferring the API shape from lower-level types alone. Live result
+against the real commissioned Dirigera bridge:
+
+```json
+{
+  "partsCount": 1,
+  "vendorName": "IKEA of Sweden",
+  "productName": "DIRIGERA",
+  "softwareVersion": "4",
+  "deviceTypeList": [{ "deviceType": 22, "revision": 1 }]
+}
+```
+
+`deviceType: 22` is Matter's standard "Aggregator" type, confirming
+Dirigera correctly identifies itself as a bridge. But `partsCount: 1` is
+the real finding: Dirigera's own REST API (`fetchDirigeraDevices`) lists
+23 real devices on this hub; the Matter bridge currently exposes exactly
+one of them. Bridging a device to Matter is evidently an explicit,
+separate, per-device step in the IKEA app, not automatic for everything
+Dirigera already manages — a genuine coverage difference, not a bug in
+either adapter. (Working hypothesis, not yet confirmed: the un-bridged
+devices are almost all IKEA's older **TRADFRI**-line products — motion
+sensors, bulbs, outlets, remotes, the bulk of the 23 seen earlier this
+session via `fetchDirigeraDevices` — while VALLHORN/PARASOLL/BADRING/
+STOFTMOLN/VINDSTYRKA belong to IKEA's newer "smart products" lineup.
+TRADFRI predates Matter's 2022 launch entirely, so it would be
+unsurprising if older TRADFRI hardware simply can't be bridged to
+Matter at all, regardless of app configuration. Worth confirming
+directly in the IKEA app before treating this as settled.)
+
+**The comparison, in short:** `dirigera-adapter.js` is one HTTPS request
+plus a `JSON.parse`, no new dependencies, no persistent state, all 23
+devices in one call. `matter-adapter.js` needed real research into
+matter.js's actual TypeScript source across four separate packages
+(`@project-chip/matter.js`'s `CommissioningController.ts`,
+`@matter/protocol`'s `ControllerCommissioner.ts`, `@matter/general`'s
+`StorageService.ts`, `@matter/nodejs`'s `NodeJsEnvironment.ts`) just to
+find the real, correct calls — confirmed by reading real installed
+source and matter.js's own maintained example, not guessed — plus a real
+PKI handshake, persistent credential-grade storage, a firewall
+collision, and currently sees only 1 of the same 23 devices. Both reach
+the same hub; the paths could not be more different in weight.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via

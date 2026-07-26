@@ -1,0 +1,23 @@
+# Curated flat display fields for a directly-commissioned Matter node --
+# see matter-adapter.js's own fetchMatterDeviceState for exactly what's
+# read (root-endpoint BasicInformation + Descriptor only, one record per
+# commissioned node -- not a breakdown of every bridged endpoint, a
+# real, larger follow-up). Flat, not deviceType-keyed, since every
+# commissioned node currently gets the same handful of root-level
+# fields regardless of what it actually is (see ecowitt.toml for the
+# same flat-vs-deviceType-keyed reasoning).
+[[fields]]
+label     = "Vendor"
+valuePath = "vendorName"
+
+[[fields]]
+label     = "Product"
+valuePath = "productName"
+
+[[fields]]
+label     = "Software Version"
+valuePath = "softwareVersion"
+
+[[fields]]
+label     = "Matter Endpoints"
+valuePath = "partsCount"
