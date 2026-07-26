@@ -115,6 +115,18 @@ export async function commissionMatterDevice({
 // reads are real remote calls the first time, then served from
 // matter.js's own local cache once subscribed (node.connect() below
 // subscribes to everything by default).
+//
+// Real-verified against the live commissioned Dirigera bridge from
+// PR1: { vendorName: "IKEA of Sweden", productName: "DIRIGERA",
+// softwareVersion: "4", deviceTypeList: [{deviceType: 22, revision: 1}],
+// partsCount: 1 }. deviceType 22 is Matter's standard "Aggregator" type,
+// confirming Dirigera correctly identifies itself as a bridge. Real,
+// concrete finding for the complexity/coverage comparison: partsCount
+// is 1 -- Dirigera's Matter bridge currently exposes only one child
+// endpoint via Matter, versus the 23 real devices its own REST API
+// lists (dirigera-adapter.js sees all of them) -- bridging a device to
+// Matter is evidently a separate, explicit step in the IKEA app, not
+// automatic for everything Dirigera already manages.
 export async function fetchMatterDeviceState(nodeId) {
   const controller = await getController();
   const node = await controller.getNode(nodeId);
