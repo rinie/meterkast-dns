@@ -114,6 +114,17 @@ stock-xiaomi-thermometer.address   = "C4:7C:8D:11:22:33"
 stock-xiaomi-thermometer.deviceType = "sig-thermometer"
 stock-xiaomi-thermometer.proxyUrl   = "http://192.168.1.52"
 
+# "mibeacon": Xiaomi's own native MiBeacon advertisement format (service
+# data UUID 0xfe95) -- stock Xiaomi firmware, or ATC/pvvx custom firmware
+# set to "Mi Like" advertising instead of its own atc1441/pvvx-custom
+# formats. Advertisement-only, same as bthome-v2 -- no GATT connection.
+# proxyUrl points at a second board here to show multiple proxies are
+# just multiple entries pointing at different boards, nothing special.
+garage-thermometer.transport = "ble-gatt"
+garage-thermometer.address   = "A4:C1:38:F2:8A:FA"
+garage-thermometer.deviceType = "mibeacon"
+garage-thermometer.proxyUrl   = "http://192.168.1.174"
+
 # Address prefixes (or full addresses) to drop from every BLE discovery
 # screen (proxy-scanned and this machine's own Windows Bluetooth alike) --
 # e.g. a neighbor's solar inverter that keeps showing up in scans. This

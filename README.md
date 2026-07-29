@@ -409,19 +409,48 @@ stock-xiaomi-thermometer.transport  = "ble-gatt"
 stock-xiaomi-thermometer.address    = "C4:7C:8D:11:22:33"
 stock-xiaomi-thermometer.deviceType = "sig-thermometer"
 stock-xiaomi-thermometer.proxyUrl   = "http://192.168.1.52"
+
+garage-thermometer.transport  = "ble-gatt"
+garage-thermometer.address    = "A4:C1:38:F2:8A:FA"
+garage-thermometer.deviceType = "mibeacon"
+garage-thermometer.proxyUrl   = "http://192.168.1.174"
 ```
 
-Two real, different BLE mechanisms live behind that one `deviceType`
-knob, matching the two things the proxy actually exposes:
+Multiple proxy boards are just multiple `proxyUrl` values on different
+playlist entries — nothing special about it, the same comma-separated
+`METERKAST_PROXY_HOSTS` setting (`parseProxyHosts` in `proxy-adapter.js`)
+already covers discovery across more than one board.
 
-- **`"advertisement"` profiles** (`bthome-v2`) need no GATT connection at
-  all — [BTHome v2](https://bthome.io/format/) is a real, officially
-  documented, self-describing sensor format (temperature, humidity,
-  battery, and more, all in one `{objectId, fixed-length value}` sequence
-  under advertisement UUID `0xFCD2`) that a modified thermometer
-  (`pvvx/ATC_MiThermometer` custom firmware) broadcasts continuously —
-  the proxy's own passive scan already sees these bytes every cycle, so
-  reading one is just decoding what `/scan/ble` already returned.
+Three real, different BLE mechanisms live behind that one `deviceType`
+knob, matching the two things the proxy actually exposes (advertisement
+vs. GATT) and one real-world wrinkle within "advertisement" itself —
+Xiaomi devices don't all speak the same advertisement format:
+
+- **`"advertisement"` profiles** (`bthome-v2`, `mibeacon`) need no GATT
+  connection at all — the proxy's own passive scan already sees these
+  bytes every cycle, so reading one is just decoding what `/scan/ble`
+  already returned.
+  - `bthome-v2`: [BTHome v2](https://bthome.io/format/) is a real,
+    officially documented, self-describing sensor format (temperature,
+    humidity, battery, and more, all in one `{objectId, fixed-length
+    value}` sequence under advertisement UUID `0xFCD2`) that a modified
+    thermometer (`pvvx/ATC_MiThermometer` custom firmware) broadcasts
+    continuously.
+  - `mibeacon`: Xiaomi's own native MiBeacon protocol (advertisement UUID
+    `0xFE95`) — stock Xiaomi firmware, or ATC/pvvx custom firmware
+    explicitly set to "Mi Like" advertising instead of its own
+    atc1441/pvvx-custom formats. A real device on this network
+    (`ATC_F28AFA`) turned out to use this format rather than either
+    `0x181A` one, which is what motivated adding it — `decodeMibeacon`
+    (`src/adapters/decode-mibeacon.js`) is ported from
+    `meterkast-proxy`'s own already-verified `mija_thermometer.cpp`
+    parser (written and confirmed live against that same device), just
+    extended to also decode battery (`0x100A`), which that firmware-side
+    parser deliberately skips since it only feeds a Matter accessory that
+    has no use for it. Frame Control's own bit flags gate which optional
+    fields (MAC, capability) are present in a given advertisement, and a
+    device round-robins which single value it reports per cycle — most
+    individual reads legitimately decode only one field, not a failure.
 - **`"gatt"` profiles** (`sig-thermometer`) connect, read, and disconnect
   each cycle — this is the same standard Bluetooth SIG Health Thermometer
   characteristic (`0x2A1C`) the WebBLE section above already resolves by
