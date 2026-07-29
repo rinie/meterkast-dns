@@ -34,6 +34,15 @@ const OBJECT_TYPES = {
   0x1004: { name: "temperature", bytes: 2, signed: true, factor: 0.1 },
   0x1006: { name: "humidity", bytes: 2, signed: false, factor: 0.1 },
   0x100a: { name: "battery", bytes: 1, signed: false, factor: 1 },
+  // The classic Xiaomi Mi Flora ("Flower care"/HHCCJCY01) plant-sensor
+  // object set -- confirmed against real, independent open-source
+  // parsers (ESPHome's xiaomi_ble, Home Assistant's ble_monitor), not
+  // guessed, and cross-checked against a real captured frame from an
+  // actual Flower care device on this network (0x1008/moisture, data
+  // byte 0x00 -- physically plausible for a sensor currently off-soil).
+  0x1007: { name: "illuminance", bytes: 3, signed: false, factor: 1 },
+  0x1008: { name: "moisture", bytes: 1, signed: false, factor: 1 },
+  0x1009: { name: "conductivity", bytes: 2, signed: false, factor: 1 },
 };
 
 // A real device on this network (a4:c1:38:f2:8a:fa) turned out to

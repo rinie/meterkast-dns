@@ -2,14 +2,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decodeMibeacon } from "../src/adapters/decode-mibeacon.js";
 
-// The battery vector below is a real, live-captured advertisement from an
-// actual device on this network ("ATC_F28AFA", a4:c1:38:f2:8a:fa) --
-// decoded by hand against meterkast-proxy's own real, already-verified
-// mija_thermometer.cpp before writing this test, not invented. The
-// temperature/humidity/edge-case vectors are hand-constructed from the
-// same documented frame layout (Frame Control flags gate which optional
-// fields are present), the same "hand-verified before writing" treatment
-// decode-bthome.test.js's own spec vectors already get.
+// Several vectors below are real, live-captured advertisements from two
+// different real devices on this network: an ATC-firmware thermometer
+// ("ATC_F28AFA", a4:c1:38:f2:8a:fa, battery/combined-temp-humidity) and
+// a Xiaomi Mi Flora plant sensor ("Flower care", c4:7c:8d:65:d2:d3,
+// temperature/moisture) -- decoded by hand before writing each test, not
+// invented; the thermometer ones were cross-checked against
+// meterkast-proxy's own real, already-verified mija_thermometer.cpp. The
+// rest (humidity/illuminance/conductivity/edge cases) are hand-constructed
+// from the same documented frame layout (Frame Control flags gate which
+// optional fields are present), the same "hand-verified before writing"
+// treatment decode-bthome.test.js's own spec vectors already get.
 
 test("decodeMibeacon decodes a real captured battery reading (Frame Control 0x3050, MAC included)", () => {
   // Frame Control(5030) + ProductID(5b05=LYWSD03MMC) + Counter(bd) +
@@ -45,6 +48,35 @@ test("decodeMibeacon returns {} for a truncated combined temperature+humidity ob
   // Object 0x100D claims len 4 but only 3 data bytes are present.
   const buffer = Buffer.from("50305b0501fa8af238c1a40d10040301fc", "hex");
   assert.deepEqual(decodeMibeacon(buffer), {});
+});
+
+test("decodeMibeacon decodes a real captured temperature reading from a Mi Flora plant sensor (PID 0x0098)", () => {
+  // Real advertisement from a second, different real device on this
+  // network ("Flower care", c4:7c:8d:65:d2:d3) -- Frame Control(2071) +
+  // ProductID(9800=0x0098, Mi Flora/HHCCJCY01) + Counter(11) + MAC
+  // reversed(d3d2658d7cc4 -> c4:7c:8d:65:d2:d3) + Capability(0d, no IO
+  // sub-flag) + Object 0x1004 len 2, data 1d01 LE = 285 -> 28.5C.
+  const buffer = Buffer.from("7120980011d3d2658d7cc40d0410021d01", "hex");
+  assert.deepEqual(decodeMibeacon(buffer), { temperature: 28.5 });
+});
+
+test("decodeMibeacon decodes a real captured moisture reading from the same Mi Flora sensor (Object 0x1008)", () => {
+  // Object 0x1008 len 1, data 00 -> 0% -- physically plausible for this
+  // real sensor currently sitting off-soil, not a guess.
+  const buffer = Buffer.from("7120980097d3d2658d7cc40d08100100", "hex");
+  assert.deepEqual(decodeMibeacon(buffer), { moisture: 0 });
+});
+
+test("decodeMibeacon decodes illuminance (uint24, factor 1, lux)", () => {
+  // Object 0x1007 len 3, data f40100 LE = 500 -> 500 lux.
+  const buffer = Buffer.from("4000980001071003f40100", "hex");
+  assert.deepEqual(decodeMibeacon(buffer), { illuminance: 500 });
+});
+
+test("decodeMibeacon decodes conductivity (uint16, factor 1, uS/cm)", () => {
+  // Object 0x1009 len 2, data 5e01 LE = 350 -> 350 uS/cm.
+  const buffer = Buffer.from("40009800010910025e01", "hex");
+  assert.deepEqual(decodeMibeacon(buffer), { conductivity: 350 });
 });
 
 test("decodeMibeacon returns {} for an encrypted frame (no bindkey to decode with)", () => {

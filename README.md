@@ -454,7 +454,18 @@ and Xiaomi/ATC devices don't all speak the same one:
     flags gate which optional fields (MAC, capability) are present in a
     given advertisement, and a device round-robins which Object it
     reports per cycle — most individual reads legitimately decode a
-    different subset of fields than the last one, not a failure.
+    different subset of fields than the last one, not a failure. A
+    second real device, a Xiaomi Mi Flora ("Flower care") plant sensor,
+    also speaks this same protocol — its classic object set
+    (`0x1007`=illuminance, `0x1008`=moisture, `0x1009`=conductivity,
+    confirmed against independent open-source parsers, not guessed) is
+    in the same table now too, and turned out to be the *only* thing
+    needed to get real plant readings — no GATT connection at all,
+    sidestepping this device's own separate GATT write-trigger issue
+    (meterkast-proxy's own `POST /gatt/session` write-then-read step
+    works correctly against it, but the sensor's real-time-data
+    characteristic never actually updates for reasons still unresolved;
+    see the honest write-up in that repo's README).
   - `atc-pvvx`: ATC1441/pvvx custom firmware's own native advertisement
     format (advertisement UUID `0x181A`, reused as a container — not an
     actual Bluetooth SIG Environmental Sensing Service payload). The

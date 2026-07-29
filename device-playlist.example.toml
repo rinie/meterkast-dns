@@ -140,6 +140,20 @@ koelkast-thermometer.address   = "A4:C1:38:70:D9:33"
 koelkast-thermometer.deviceType = "mibeacon"
 koelkast-thermometer.proxyUrl   = "http://192.168.1.174"
 
+# A third "mibeacon" device, a real Xiaomi Mi Flora ("Flower care") plant
+# sensor -- same deviceType/profile, different real product entirely
+# (its own Product ID, its own object set: illuminance/moisture/
+# conductivity rather than temperature/humidity). No GATT connection at
+# all -- this is the same passive-advertisement path as the two
+# thermometers above, and turned out to be the only thing needed for
+# real plant readings; a separate GATT write-trigger attempt against
+# this same device's real-time-data characteristic never actually
+# worked (see meterkast-proxy's own README).
+flower-care.transport = "ble-gatt"
+flower-care.address   = "C4:7C:8D:65:D2:D3"
+flower-care.deviceType = "mibeacon"
+flower-care.proxyUrl   = "http://192.168.1.174"
+
 # Two kinds of entry drop devices from every BLE discovery screen
 # (proxy-scanned and this machine's own Windows Bluetooth alike). This
 # lives here, not on the ESP32: the proxy board still sees and reports

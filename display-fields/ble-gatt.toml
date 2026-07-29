@@ -1,15 +1,16 @@
 # Curated flat display fields for transport: "ble-gatt" -- flat, not
 # deviceType-keyed, because every profile in ble-gatt-profiles.js already
 # normalizes its decode() output to the same field names (temperature,
-# humidity, battery, voltage) regardless of which physical protocol
-# (BTHome v2/MiBeacon/atc-pvvx advertisement, SIG Health Thermometer GATT)
-# actually produced the reading -- see ecowitt.toml/matter.toml for the
-# same flat-vs-deviceType reasoning, and ble-gatt-profiles.js for where
-# the normalization happens. valuePath is a dot-path into a device's own
-# `meta` object. A field a given profile never populates (e.g. voltage,
-# only decoded by atc-pvvx) is simply skipped for any reading that
-# doesn't include it -- see flattenDisplayFields's own "only show what's
-# real" behavior.
+# humidity, battery, voltage, illuminance, moisture, conductivity)
+# regardless of which physical protocol (BTHome v2/MiBeacon/atc-pvvx
+# advertisement, SIG Health Thermometer GATT) actually produced the
+# reading -- see ecowitt.toml/matter.toml for the same flat-vs-deviceType
+# reasoning, and ble-gatt-profiles.js for where the normalization happens.
+# valuePath is a dot-path into a device's own `meta` object. A field a
+# given profile never populates (e.g. moisture, only decoded by mibeacon
+# for a plant sensor) is simply skipped for any reading that doesn't
+# include it -- see flattenDisplayFields's own "only show what's real"
+# behavior.
 [[fields]]
 label     = "Temperature"
 valuePath = "temperature"
@@ -29,3 +30,18 @@ unit      = "%"
 label     = "Battery Voltage"
 valuePath = "voltage"
 unit      = "V"
+
+[[fields]]
+label     = "Illuminance"
+valuePath = "illuminance"
+unit      = "lux"
+
+[[fields]]
+label     = "Soil Moisture"
+valuePath = "moisture"
+unit      = "%"
+
+[[fields]]
+label     = "Soil Conductivity"
+valuePath = "conductivity"
+unit      = "uS/cm"
