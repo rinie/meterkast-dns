@@ -1600,6 +1600,41 @@ cross-proxy dedup, a `unclaimedProxyBleDevices` uuid-based exclusion,
 and its `serviceDataUuidCounts` attachment). `node --test
 test/run-all.js`: 211 pass, 1 pre-existing skip, 0 failing.
 
+**A real Mi Flora plant sensor's GATT write-trigger led nowhere (see the
+companion writeup in meterkast-proxy's own README), but its *passive*
+MiBeacon advertisement turned out to carry real sensor data all along --
+`decodeMibeacon` already handled it with zero code changes for one
+field.** Investigating why the sensor's `POST /gatt/session` write-then-
+read round-trip kept returning a documented-but-static placeholder value
+led to inspecting the same real device's *other*, already-flowing
+`0xfe95` advertisement -- and a fresh capture from a phone/Home-
+Assistant-style BLE receiver decoded cleanly against the already-shipped
+`decodeMibeacon`: Object `0x1004` (temperature), real bytes, `28.5°C`.
+This device's own Product ID (`0x0098`) differs from the ATC thermometers'
+(`0x055B`), confirmed by tracing the same frame layout -- MAC embedded
+and byte-reversed exactly as before, matching the device's own address.
+A second real capture from this project's own C6 board showed a
+different Object, `0x1008`, 1 byte, value `0x00` -- not in
+`decode-mibeacon.js`'s `OBJECT_TYPES` table at the time, so it decoded
+to `{}`. Rather than guess what `0x1008` means, checked two independent,
+widely-used open-source parsers (ESPHome's `xiaomi_ble`, Home Assistant's
+`ble_monitor`) before writing anything: `0x1007`=illuminance (uint24,
+lux), `0x1008`=moisture (uint8, %), `0x1009`=conductivity (uint16,
+uS/cm) -- the classic Mi Flora/HHCCJCY01 object set, confirmed against
+real, independent sources, not invented. `0x1008`'s real value (`0`%
+moisture) is physically plausible for a sensor currently off-soil,
+further corroborating the identification. Added all three to
+`OBJECT_TYPES` (4 new tests: the two real captures above, plus
+hand-constructed illuminance/conductivity vectors from the same
+documented layout) and three new `display-fields/ble-gatt.toml` fields.
+Claimed live as `flower-care` (`ble-gatt`/`mibeacon`, the same profile
+`garage-thermometer`/`koelkast-thermometer` already use) -- confirmed
+working with a *fourth*, previously-untested Object type showing up on
+the very first live poll: `GET /devices/flower-care` returned
+`{"illuminance":84}`, a real reading the decoder had never been
+exercised against in any test, only in the wild. `node --test
+test/run-all.js`: 215 pass, 1 pre-existing skip, 0 failing.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
