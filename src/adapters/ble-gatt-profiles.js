@@ -14,6 +14,7 @@
 //   strings directly).
 import { decodeBthome } from "./decode-bthome.js";
 import { decodeMibeacon } from "./decode-mibeacon.js";
+import { decodeAtcPvvx } from "./decode-atc-pvvx.js";
 import { decodeTemperatureMeasurement } from "./decode-temperature-measurement.js";
 import { KNOWN_SERVICES } from "./known-services.js";
 import { KNOWN_CHARACTERISTICS } from "./known-characteristics.js";
@@ -42,6 +43,20 @@ export const BLE_GATT_PROFILES = {
     kind: "advertisement",
     serviceDataUuid: "fe95",
     decode: (serviceData) => decodeMibeacon(serviceData),
+  },
+  // ATC1441/pvvx custom thermometer firmware's own native advertisement
+  // format -- the richest of the three advertisement profiles for a
+  // device running it: temperature, humidity, battery percent, and
+  // battery voltage all arrive in one packet every cycle, unlike
+  // MiBeacon's round-robin Object-per-advertisement design. Two real,
+  // different byte layouts share this one UUID (0x181A, reused as a
+  // container, not an actual Bluetooth SIG Environmental Sensing Service
+  // payload), told apart purely by payload length -- see
+  // decode-atc-pvvx.js.
+  "atc-pvvx": {
+    kind: "advertisement",
+    serviceDataUuid: "181a",
+    decode: (serviceData) => decodeAtcPvvx(serviceData),
   },
   // A standard Bluetooth SIG Health Thermometer -- real, if this
   // project's own history is any guide, only for a device that actually

@@ -412,8 +412,8 @@ stock-xiaomi-thermometer.proxyUrl   = "http://192.168.1.52"
 
 garage-thermometer.transport  = "ble-gatt"
 garage-thermometer.address    = "A4:C1:38:F2:8A:FA"
-garage-thermometer.deviceType = "mibeacon"
-garage-thermometer.proxyUrl   = "http://192.168.1.174"
+garage-thermometer.deviceType = "atc-pvvx"
+garage-thermometer.proxyUrl   = "http://192.168.1.52"
 ```
 
 Multiple proxy boards are just multiple `proxyUrl` values on different
@@ -421,15 +421,16 @@ playlist entries — nothing special about it, the same comma-separated
 `METERKAST_PROXY_HOSTS` setting (`parseProxyHosts` in `proxy-adapter.js`)
 already covers discovery across more than one board.
 
-Three real, different BLE mechanisms live behind that one `deviceType`
+Four real, different BLE mechanisms live behind that one `deviceType`
 knob, matching the two things the proxy actually exposes (advertisement
-vs. GATT) and one real-world wrinkle within "advertisement" itself —
-Xiaomi devices don't all speak the same advertisement format:
+vs. GATT) and two real-world wrinkles within "advertisement" itself — the
+same real device can broadcast more than one vendor format concurrently,
+and Xiaomi/ATC devices don't all speak the same one:
 
-- **`"advertisement"` profiles** (`bthome-v2`, `mibeacon`) need no GATT
-  connection at all — the proxy's own passive scan already sees these
-  bytes every cycle, so reading one is just decoding what `/scan/ble`
-  already returned.
+- **`"advertisement"` profiles** (`bthome-v2`, `mibeacon`, `atc-pvvx`)
+  need no GATT connection at all — the proxy's own passive scan already
+  sees these bytes every cycle, so reading one is just decoding what
+  `/scan/ble` already returned.
   - `bthome-v2`: [BTHome v2](https://bthome.io/format/) is a real,
     officially documented, self-describing sensor format (temperature,
     humidity, battery, and more, all in one `{objectId, fixed-length
@@ -440,17 +441,40 @@ Xiaomi devices don't all speak the same advertisement format:
     `0xFE95`) — stock Xiaomi firmware, or ATC/pvvx custom firmware
     explicitly set to "Mi Like" advertising instead of its own
     atc1441/pvvx-custom formats. A real device on this network
-    (`ATC_F28AFA`) turned out to use this format rather than either
-    `0x181A` one, which is what motivated adding it — `decodeMibeacon`
-    (`src/adapters/decode-mibeacon.js`) is ported from
-    `meterkast-proxy`'s own already-verified `mija_thermometer.cpp`
-    parser (written and confirmed live against that same device), just
-    extended to also decode battery (`0x100A`), which that firmware-side
-    parser deliberately skips since it only feeds a Matter accessory that
-    has no use for it. Frame Control's own bit flags gate which optional
-    fields (MAC, capability) are present in a given advertisement, and a
-    device round-robins which single value it reports per cycle — most
-    individual reads legitimately decode only one field, not a failure.
+    (`ATC_F28AFA`) turned out to use this format, which is what motivated
+    adding it — `decodeMibeacon` (`src/adapters/decode-mibeacon.js`) is
+    ported from `meterkast-proxy`'s own already-verified
+    `mija_thermometer.cpp` parser (written and confirmed live against
+    that same device), extended to also decode battery (`0x100A`), which
+    that firmware-side parser deliberately skips since it only feeds a
+    Matter accessory that has no use for it, and later extended again to
+    decode a combined temperature+humidity Object (`0x100D`) once a real
+    captured frame showed this device reports the two combined rather
+    than as separate `0x1004`/`0x1006` Objects. Frame Control's own bit
+    flags gate which optional fields (MAC, capability) are present in a
+    given advertisement, and a device round-robins which Object it
+    reports per cycle — most individual reads legitimately decode a
+    different subset of fields than the last one, not a failure.
+  - `atc-pvvx`: ATC1441/pvvx custom firmware's own native advertisement
+    format (advertisement UUID `0x181A`, reused as a container — not an
+    actual Bluetooth SIG Environmental Sensing Service payload). The
+    richest of the three advertisement profiles for a device running
+    this firmware: temperature, humidity, battery percent, *and* battery
+    voltage all arrive in one packet every cycle, with no MiBeacon-style
+    round-robin wait. The same `ATC_F28AFA` device broadcasts this
+    format *concurrently* with MiBeacon (0xFE95) — worth stating
+    plainly, since an earlier version of this doc claimed the device
+    used MiBeacon "rather than" 0x181A, which real further inspection of
+    the same live `/scan/ble` capture showed was wrong; a device
+    choosing to advertise under one vendor UUID doesn't mean it isn't
+    also advertising under another. Two real, different byte layouts
+    share this one UUID, told apart purely by payload length (13 bytes:
+    the original atc1441 format; 15 bytes: pvvx's extended "custom"
+    format) — `decodeAtcPvvx` (`src/adapters/decode-atc-pvvx.js`)
+    reuses the same temperature/humidity math already verified in
+    `mija_thermometer.cpp`'s own `decodeAtc1441`/`decodePvvxCustom`, with
+    battery/voltage decoding new here, cross-checked against a real
+    captured pvvx-format frame from the same device.
 - **`"gatt"` profiles** (`sig-thermometer`) connect, read, and disconnect
   each cycle — this is the same standard Bluetooth SIG Health Thermometer
   characteristic (`0x2A1C`) the WebBLE section above already resolves by
@@ -458,9 +482,10 @@ Xiaomi devices don't all speak the same advertisement format:
   a browser tab.
 
 Every profile's `decode()` normalizes its output to the same flat field
-names (`temperature`, `humidity`, `battery`, always Celsius) regardless of
-which physical mechanism produced the reading, so `display-fields/ble-gatt.toml`
-can stay a flat catalog rather than one keyed by `deviceType` — the same
+names (`temperature`, `humidity`, `battery`, `voltage`, always Celsius)
+regardless of which physical mechanism produced the reading, so
+`display-fields/ble-gatt.toml` can stay a flat catalog rather than one
+keyed by `deviceType` — the same
 flat-vs-keyed reasoning as `ecowitt.toml` vs. `dirigera.toml` (see
 "Flattening nested readings for display" below), just decided at the
 profile layer instead of the display layer this time.

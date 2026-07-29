@@ -1491,6 +1491,67 @@ edge cases the firmware parser itself guards against (encrypted frame,
 no Object present, a declared-but-truncated Object). `node --test
 test/run-all.js`: 200 pass, 1 pre-existing skip, 0 failing.
 
+**`decodeMibeacon` had a real gap, caught only by claiming the device
+live and watching it never once report temperature.** Live-polled for
+roughly 20 minutes straight (~20 cycles), `garage-thermometer` reported
+`{battery: 71}` every single cycle, unchanged. Two things turned out to
+be true at once, discovered by checking the proxy's own raw
+`/scan/ble` directly rather than assuming the daemon was the problem:
+(1) the specific proxy board this entry was bound to (the C6 at
+`192.168.1.174`) had a genuinely stale cache for this device (`ageMs`
+over 35 minutes, unmoving across repeated checks) — not a bug, just this
+particular board not currently seeing the device; (2) a *fresher*
+capture from the *other* board (the M5StickC at `192.168.1.52`) revealed
+the real reason temperature would never have shown up even with a fresh
+read: this device reports temperature and humidity combined in one
+Object (`0x100D`, 4 bytes: int16 LE temperature x0.1C directly followed
+by uint16 LE humidity x0.1%), not as the two separate `0x1004`/`0x1006`
+Objects the decoder only handled at the time. Hand-decoded against the
+real bytes (`50305b0501fa8af238c1a40d10040301fc01`) before writing
+either the fix or its test: `0x100D`, length 4, data `0301fc01` →
+temperature 25.9°C, humidity 50.8% — both physically plausible and,
+once the fix shipped and the daemon was pointed at the fresher board and
+restarted, confirmed live: `GET /devices/garage-thermometer` returned
+exactly `{"temperature":25.9,"humidity":50.8}`. 2 new tests (the real
+frame above, plus a truncated-`0x100D` edge case). `node --test
+test/run-all.js`: 202 pass, 1 pre-existing skip, 0 failing.
+
+**A fourth profile, `atc-pvvx`, added the same day from a second,
+independent decode of the same device's *other* concurrent advertisement
+format — and corrected a wrong claim this document had just made.**
+Manually researching the same device's `0x181A` service data (a
+different UUID from MiBeacon's `0xFE95`, both present in the same real
+`/scan/ble` capture) turned up ATC1441/pvvx custom firmware's own native
+format — richer than MiBeacon for a device running this firmware
+specifically, since temperature, humidity, battery percent, *and*
+battery voltage all arrive in one packet every cycle, with no
+MiBeacon-style round-robin. `decodeAtcPvvx`
+(`src/adapters/decode-atc-pvvx.js`) reuses temperature/humidity math
+already real-verified in `mija_thermometer.cpp`'s own
+`decodeAtc1441`/`decodePvvxCustom` (confirmed identical here); battery
+percent and voltage are new, cross-checked against a real captured
+pvvx-format frame from this same device
+(`fa8af238c1a4250af213190b47a104`) before any code was written:
+temperature 25.97°C, humidity 51.06%, voltage 2.841V, battery 71% — all
+four independently re-derived by hand and matching exactly. Worth
+correcting plainly rather than quietly editing away: an earlier revision
+of both this document and README.md claimed the `ATC_F28AFA` device used
+MiBeacon "rather than" `0x181A` — wrong, disproven by this same
+`/scan/ble` capture showing both service-data UUIDs present
+simultaneously; a device choosing to advertise under one vendor UUID
+never implied it wasn't also advertising under another. 3 new tests
+(the real pvvx-format frame above, a hand-constructed 13-byte original
+atc1441-format frame per `mija_thermometer.h`'s own documented layout,
+and an unrecognized-length case). Live end to end: `garage-thermometer`
+repointed from `mibeacon` to `atc-pvvx` (and from the C6 board back to
+the M5StickC, which currently has the fresher view of this device),
+daemon restarted, `GET /devices/garage-thermometer` returned
+`{"temperature":25.93,"humidity":51.59,"voltage":2.839,"battery":71}` —
+a fresh reading close to but distinct from both the `mibeacon`-derived
+values and the hand-decoded ones above, confirming genuinely live data
+rather than a cached/stale value. `node --test test/run-all.js`: 205
+pass, 1 pre-existing skip, 0 failing.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
