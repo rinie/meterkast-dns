@@ -7,16 +7,8 @@
 // knowledge lives here either -- that's entirely in the profile.
 import { fetchProxyJson } from "./proxy-adapter.js";
 import { BLE_GATT_PROFILES } from "./ble-gatt-profiles.js";
+import { normalizeUuid } from "./ble-ignore.js";
 import { log } from "../core/log.js";
-
-// The ESP32's own NimBLEUUID::toString() renders a 16-bit UUID as
-// "0xfcd2" (confirmed live against the real device, not assumed) --
-// profiles reference the bare "fcd2" form instead (matching
-// known-services.js's own convention), so matching has to be tolerant
-// of the "0x" prefix rather than require an exact string match.
-function normalizeUuid(uuid) {
-  return uuid.toLowerCase().replace(/^0x/, "");
-}
 
 async function readAdvertisementProfile(proxyUrl, address, profile) {
   const devices = await fetchProxyJson(proxyUrl, "/scan/ble");

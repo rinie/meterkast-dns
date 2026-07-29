@@ -24,7 +24,7 @@
 // browser-triggered WebBluetooth GATT read), so its proxy-discovery
 // logic stays here.
 import { log } from "../core/log.js";
-import { isBleIgnored } from "./ble-ignore.js";
+import { isBleIgnored, normalizeUuid } from "./ble-ignore.js";
 
 function slugify(text) {
   return text
@@ -88,6 +88,33 @@ export async function discoverBleViaProxies(proxyUrls) {
   return Object.fromEntries(proxyUrls.map((url, i) => [url, results[i]]));
 }
 
+// How many currently-visible devices advertise each serviceData UUID --
+// real motivation: deciding whether a `bleIgnore = ["uuid:XXXX"]` entry
+// is worth adding at all (Google's crowdsourced "Find My Device" beacon
+// showed up on 53 different, privacy-rotating addresses in one real
+// scan; a device broadcasting a UUID nothing else uses is a real,
+// distinct sensor, not noise). Deduped by address across every
+// configured proxy first -- two boards both seeing the same physical
+// device shouldn't count it twice, the tally is about how common a UUID
+// is in the environment, not how many boards happened to catch it.
+export function tallyServiceDataUuidCounts(rawDevicesByProxy) {
+  const byAddress = new Map();
+  for (const devices of Object.values(rawDevicesByProxy)) {
+    for (const device of devices) {
+      byAddress.set(device.address.toUpperCase(), device);
+    }
+  }
+  const counts = {};
+  for (const device of byAddress.values()) {
+    if (!device.serviceData) continue;
+    for (const uuid of Object.keys(device.serviceData)) {
+      const normalized = normalizeUuid(uuid);
+      counts[normalized] = (counts[normalized] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
 // transport stays "bluetooth" -- the same value the Windows-native
 // paired/nearby scans and web-scan.html's own WebBluetooth flow already
 // use.
@@ -97,17 +124,21 @@ export function unclaimedProxyBleDevices(rawDevicesByProxy, configuredRecords, i
       .filter((record) => record.transport === "bluetooth")
       .map((record) => record.address),
   );
+  const uuidCounts = tallyServiceDataUuidCounts(rawDevicesByProxy);
   const candidates = [];
   for (const [proxyUrl, devices] of Object.entries(rawDevicesByProxy)) {
     for (const device of devices) {
       const address = device.address.toUpperCase();
       if (claimed.has(address)) continue;
-      if (isBleIgnored(address, ignoreList)) continue;
+      if (isBleIgnored(address, ignoreList, device.serviceData)) continue;
+      const serviceDataUuidCounts = device.serviceData
+        ? Object.fromEntries(Object.keys(device.serviceData).map((uuid) => [normalizeUuid(uuid), uuidCounts[normalizeUuid(uuid)]]))
+        : undefined;
       candidates.push({
         transport: "bluetooth",
         address,
         suggestedName: device.name ? slugify(device.name) : `bluetooth-${address.replace(/:/g, "")}`,
-        meta: { name: device.name, rssi: device.rssi, ageMs: device.ageMs, sourceProxy: proxyUrl },
+        meta: { name: device.name, rssi: device.rssi, ageMs: device.ageMs, sourceProxy: proxyUrl, serviceDataUuidCounts },
       });
     }
   }

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseProxyHosts, discoverBleViaProxies, unclaimedProxyBleDevices } from "../src/adapters/proxy-adapter.js";
+import { parseProxyHosts, discoverBleViaProxies, unclaimedProxyBleDevices, tallyServiceDataUuidCounts } from "../src/adapters/proxy-adapter.js";
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -87,7 +87,7 @@ test("unclaimedProxyBleDevices uppercases the address, excludes an already-claim
       transport: "bluetooth",
       address: "11:22:33:44:55:66".toUpperCase(),
       suggestedName: "bluetooth-112233445566",
-      meta: { name: undefined, rssi: -80, ageMs: 30500, sourceProxy: "http://proxy-a" },
+      meta: { name: undefined, rssi: -80, ageMs: 30500, sourceProxy: "http://proxy-a", serviceDataUuidCounts: undefined },
     },
   ]);
 });
@@ -111,4 +111,50 @@ test("unclaimedProxyBleDevices suggests a slugified name when the device adverti
 
   assert.equal(candidates[0].suggestedName, "oven");
   assert.equal(candidates[0].address, "AA:BB:CC:DD:EE:FF");
+});
+
+test("tallyServiceDataUuidCounts counts each serviceData UUID across every configured proxy, deduped by address", () => {
+  const rawByProxy = {
+    "http://proxy-a": [
+      { address: "11:11:11:11:11:11", serviceData: { "0xfef3": "aa" } },
+      { address: "22:22:22:22:22:22", serviceData: { "0xfef3": "bb", "0xfcd2": "cc" } },
+    ],
+    // Same physical device as the first one above, also seen by a second board -- must not be double-counted.
+    "http://proxy-b": [{ address: "11:11:11:11:11:11", serviceData: { "0xfef3": "aa-fresher" } }],
+  };
+
+  assert.deepEqual(tallyServiceDataUuidCounts(rawByProxy), { fef3: 2, fcd2: 1 });
+});
+
+test("unclaimedProxyBleDevices excludes a device matching a uuid: bleIgnore entry, keeps others", () => {
+  const rawByProxy = {
+    "http://proxy-a": [
+      { address: "11:11:11:11:11:11", rssi: -80, ageMs: 100, serviceData: { "0xfef3": "aa" } },
+      { address: "22:22:22:22:22:22", rssi: -70, ageMs: 200, serviceData: { "0xfcd2": "bb" } },
+    ],
+  };
+
+  const candidates = unclaimedProxyBleDevices(rawByProxy, {}, ["uuid:fef3"]);
+
+  assert.deepEqual(
+    candidates.map((c) => c.address),
+    ["22:22:22:22:22:22"],
+  );
+});
+
+test("unclaimedProxyBleDevices attaches how common each of a device's own serviceData UUIDs is across the current scan", () => {
+  const rawByProxy = {
+    "http://proxy-a": [
+      { address: "11:11:11:11:11:11", rssi: -80, ageMs: 100, serviceData: { "0xfef3": "aa" } },
+      { address: "22:22:22:22:22:22", rssi: -70, ageMs: 200, serviceData: { "0xfef3": "bb" } },
+      { address: "33:33:33:33:33:33", rssi: -60, ageMs: 300, serviceData: { "0xfcd2": "cc" } },
+    ],
+  };
+
+  const candidates = unclaimedProxyBleDevices(rawByProxy, {});
+
+  const common = candidates.find((c) => c.address === "11:11:11:11:11:11");
+  assert.deepEqual(common.meta.serviceDataUuidCounts, { fef3: 2 });
+  const rare = candidates.find((c) => c.address === "33:33:33:33:33:33");
+  assert.deepEqual(rare.meta.serviceDataUuidCounts, { fcd2: 1 });
 });

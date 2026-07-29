@@ -140,10 +140,21 @@ koelkast-thermometer.address   = "A4:C1:38:70:D9:33"
 koelkast-thermometer.deviceType = "mibeacon"
 koelkast-thermometer.proxyUrl   = "http://192.168.1.174"
 
-# Address prefixes (or full addresses) to drop from every BLE discovery
-# screen (proxy-scanned and this machine's own Windows Bluetooth alike) --
-# e.g. a neighbor's solar inverter that keeps showing up in scans. This
+# Two kinds of entry drop devices from every BLE discovery screen
+# (proxy-scanned and this machine's own Windows Bluetooth alike). This
 # lives here, not on the ESP32: the proxy board still sees and reports
 # these devices, they're just filtered out of "what's new" before you'd
 # ever have to look at them. See README.md "BLE discovery blacklist".
-bleIgnore = ["DE:AD:BE:EF:00:"]
+#
+# - A bare entry is an address prefix (or full address) -- e.g. a
+#   neighbor's solar inverter that keeps showing up in scans.
+# - A "uuid:XXXX" entry matches by advertisement service-data UUID
+#   instead -- the only real fix for a device using genuinely rotating
+#   private addresses, like Android's crowdsourced "Find My Device"
+#   network beacon (0xfef3, real Google-registered UUID) -- no fixed
+#   address prefix could ever catch that one. proxy-adapter.js's own
+#   discover response tags each candidate with a serviceDataUuidCounts
+#   field (how many currently-visible devices share each of its UUIDs)
+#   specifically to help decide whether a UUID is common/noisy enough to
+#   be worth a "uuid:" entry.
+bleIgnore = ["DE:AD:BE:EF:00:", "uuid:fef3"]

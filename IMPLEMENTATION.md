@@ -1552,6 +1552,54 @@ values and the hand-decoded ones above, confirming genuinely live data
 rather than a cached/stale value. `node --test test/run-all.js`: 205
 pass, 1 pre-existing skip, 0 failing.
 
+**`bleIgnore` gained vendor-UUID matching, and discovery candidates
+gained a serviceData-UUID occurrence count, both driven by a real
+question the growing scan aggregation kept raising: which of these
+service-data UUIDs are genuinely noise?** Manually tallying serviceData
+UUIDs across both proxy boards' `/scan/ble` output turned up two by far
+the most common (`0xFEF3` on 53 different addresses, `0xFCF1` on 25),
+cross-referenced against the real [Bluetooth SIG assigned-numbers
+registry](https://www.bluetooth.com/specifications/assigned-numbers/) as
+both registered to Google LLC — almost certainly Android's crowdsourced
+"Find My Device" network beacon, given every address spot-checked
+carried the private-address bit pattern non-resolvable random addresses
+use and near-identical payloads recurred across different addresses. A
+third, `0xFDF7`, registered to HP Inc., showed up on only 2 stable
+(non-rotating) addresses — one of them independently confirmed by this
+project's own real Windows Bluetooth nearby-scan capture as
+`"Smart Tank 7300 series"`, a real HP printer.
+
+That real finding directly motivated the two additions, both
+meterkast-dns-only (no meterkast-proxy change) since both operate on
+`serviceData` the proxy already returns generically:
+
+- `isBleIgnored` (`ble-ignore.js`) now accepts an optional `serviceData`
+  argument and matches a `"uuid:XXXX"` entry against its keys
+  (`normalizeUuid`-tolerant of the `0x` prefix, moved here from
+  `ble-gatt-proxy-adapter.js` — one shared implementation, not two) --
+  the only real fix for the Google beacon case above, since its
+  genuinely rotating private address makes any fixed address-prefix
+  entry useless against it. Windows-native discovery (no `serviceData`
+  at all in that shape) simply never matches a `"uuid:"` entry --
+  `isBleIgnored` already treated a missing third argument as "no
+  serviceData," so those call sites needed no change at all.
+- `tallyServiceDataUuidCounts` (`proxy-adapter.js`) counts how many
+  currently-visible devices advertise each serviceData UUID, deduped by
+  address across every configured proxy first (the same physical device
+  seen by two boards must not be double-counted, or a stable
+  single-device UUID like the HP printer's could look artificially
+  common). `unclaimedProxyBleDevices` now tags each candidate's `meta`
+  with a `serviceDataUuidCounts` map covering that specific device's own
+  UUIDs -- real, direct support for the actual decision a `"uuid:"`
+  entry requires (is this UUID common/noisy enough across the current
+  environment to be worth ignoring outright?), not a guess.
+
+6 new tests (`isBleIgnored`'s uuid matching and its no-match/no-data
+cases, `normalizeUuid` itself, `tallyServiceDataUuidCounts`'s
+cross-proxy dedup, a `unclaimedProxyBleDevices` uuid-based exclusion,
+and its `serviceDataUuidCounts` attachment). `node --test
+test/run-all.js`: 211 pass, 1 pre-existing skip, 0 failing.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
