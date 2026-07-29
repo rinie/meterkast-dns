@@ -129,6 +129,17 @@ garage-thermometer.address   = "A4:C1:38:F2:8A:FA"
 garage-thermometer.deviceType = "atc-pvvx"
 garage-thermometer.proxyUrl   = "http://192.168.1.52"
 
+# "mibeacon": a second real device, this one currently in Xiaomi's native
+# Mi Home advertising mode rather than pvvx custom mode -- same custom
+# ATC firmware (name still reads "ATC_..."), just a different advertising
+# format selected on it. Nothing stops the same deviceType from being
+# reused across as many playlist entries as there are real devices
+# speaking it.
+koelkast-thermometer.transport = "ble-gatt"
+koelkast-thermometer.address   = "A4:C1:38:70:D9:33"
+koelkast-thermometer.deviceType = "mibeacon"
+koelkast-thermometer.proxyUrl   = "http://192.168.1.174"
+
 # Address prefixes (or full addresses) to drop from every BLE discovery
 # screen (proxy-scanned and this machine's own Windows Bluetooth alike) --
 # e.g. a neighbor's solar inverter that keeps showing up in scans. This
