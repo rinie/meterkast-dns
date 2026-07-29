@@ -493,14 +493,44 @@ profile layer instead of the display layer this time.
 **BLE discovery blacklist.** A proxy board's passive scan sees every BLE
 device in range, not just yours — a neighbor's solar inverter, say, that
 keeps showing up on `/screens/discover`'s BLE panel with nothing to do
-about it. A top-level `bleIgnore` array in `device-playlist.toml` names
-address prefixes (or full addresses) to drop from *every* BLE discovery
-source — the proxy's own scan and this machine's native Windows Bluetooth
-scans alike — before they're ever shown as a candidate:
+about it. A top-level `bleIgnore` array in `device-playlist.toml` drops
+matching devices from *every* BLE discovery source — the proxy's own
+scan and this machine's native Windows Bluetooth scans alike — before
+they're ever shown as a candidate. Two kinds of entry, for two real,
+different reasons a device needs ignoring:
 
 ```toml
-bleIgnore = ["DE:AD:BE:EF:00:"]   # a whole vendor's OUI block, or a full address
+bleIgnore = ["DE:AD:BE:EF:00:", "uuid:fef3"]
 ```
+
+- A bare entry is an address prefix (or full address) — `DE:AD:BE:EF:00:`
+  covers a whole vendor's OUI block, a full address covers just one
+  device.
+- A `"uuid:XXXX"` entry instead matches by advertisement service-data
+  UUID — the only real fix for a device using genuinely rotating private
+  addresses, where no fixed address prefix could ever catch it. Real,
+  concrete motivation: cross-referencing a live scan's `serviceData`
+  UUIDs against the official [Bluetooth SIG assigned-numbers
+  registry](https://www.bluetooth.com/specifications/assigned-numbers/)
+  turned up `0xFEF3`, registered to Google LLC — showing up on 53
+  *different* addresses in one real scan, the ones spot-checked all
+  carrying the private-address bit pattern non-resolvable random
+  addresses use, with near-identical payloads recurring across them.
+  Almost certainly Android's
+  crowdsourced "Find My Device" network beacon, broadcast by every
+  nearby Android phone by default — real noise, not a sensor worth
+  decoding, and un-ignorable by address since the address itself is the
+  thing rotating.
+
+`unclaimedProxyBleDevices` tags each proxy-discovered candidate with a
+`serviceDataUuidCounts` field (`{uuid: count}`, deduped by address across
+every configured proxy first so the same physical device seen by two
+boards isn't counted twice) covering the UUIDs *that specific device*
+advertises — real support for the actual decision a `"uuid:"` entry
+requires: is this UUID common/noisy enough across the current
+environment to be worth ignoring outright, or is it one real, distinct
+device that happens to only need a plain address entry (or no ignoring
+at all)?
 
 This lives here, in the playlist, on purpose — not on the ESP32. The
 proxy board keeps scanning and reporting every device it sees regardless;
