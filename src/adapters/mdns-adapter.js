@@ -153,7 +153,15 @@ export async function resolveViaProxy(proxyUrl, address) {
     if (!match) throw new Error(`mDNS via proxy ${proxyUrl}: no service instance found for ${address}`);
     return { instanceName: match.hostname, host: match.ip, port: match.port, txt: {} };
   }
-  const match = entries.find((entry) => entry.hostname === address);
+  // The proxy's own /scan/mdns reports a plain hostname's own A record
+  // with a bare hostname (confirmed live: "meterkast-proxy", not
+  // "meterkast-proxy.local") -- a configured playlist address keeps the
+  // ".local" suffix every other mdns entry uses (README's own convention,
+  // "printer.local"), so this comparison needs the same ".local" strip
+  // the service-query branch above already does, or a real hostname entry
+  // the proxy is actively reporting can never match.
+  const bareHostname = address.replace(/\.local\.?$/i, "");
+  const match = entries.find((entry) => entry.hostname === bareHostname);
   if (!match) throw new Error(`mDNS via proxy ${proxyUrl}: no A or AAAA record found for ${address}`);
   return { resolvedAddress: match.ip, family: "A" };
 }
@@ -182,10 +190,20 @@ export async function discoverMdnsViaProxies(proxyUrls) {
 }
 
 export function unclaimedMdnsCandidates(proxyEntries, configuredRecords) {
+  // Same real mismatch resolveViaProxy above had to fix: a configured
+  // playlist address keeps the ".local" suffix (README's own convention),
+  // but the proxy's own /scan/mdns reports a plain hostname's own A
+  // record bare (confirmed live: "meterkast-proxy", not
+  // "meterkast-proxy.local"). Comparing them as-is meant an
+  // already-claimed device could never be recognized as claimed here --
+  // it would keep showing up as a fresh "unclaimed" candidate forever.
+  // Normalized to the bare form (already what entry.hostname naturally
+  // is) before comparing, rather than requiring every entry.hostname use
+  // to remember to strip it individually.
   const claimed = new Set(
     Object.values(configuredRecords)
       .filter((record) => record.transport === "mdns")
-      .map((record) => record.address),
+      .map((record) => record.address.replace(/\.local\.?$/i, "")),
   );
   const seen = new Set();
   const candidates = [];
@@ -194,8 +212,11 @@ export function unclaimedMdnsCandidates(proxyEntries, configuredRecords) {
     seen.add(entry.hostname);
     candidates.push({
       transport: "mdns",
-      address: entry.hostname,
-      suggestedName: slugify(entry.hostname.replace(/\.local\.?$/i, "")),
+      // Suggested as a claimable playlist address, so it needs the same
+      // ".local" suffix every other mdns example in this project uses --
+      // entry.hostname itself is always bare (see above).
+      address: `${entry.hostname}.local`,
+      suggestedName: slugify(entry.hostname),
       meta: { serviceType: entry.serviceType, ip: entry.ip, port: entry.port, sourceProxy: entry.sourceProxy },
     });
   }

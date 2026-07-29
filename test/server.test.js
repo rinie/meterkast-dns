@@ -208,6 +208,24 @@ test("handleList adds curated display lines per record's own transport, empty fo
   assert.deepEqual(kitchenLamp.display, []);
 });
 
+test("handleList/handleGet attach resolvedAddress for a resolved dns/mdns record, omit it otherwise", () => {
+  const registry = createRegistry();
+  upsertRecord(registry, "raspi3", { transport: "dns", address: "raspi3.home", meta: { resolvedAddress: "192.168.1.53" } });
+  upsertRecord(registry, "printer", { transport: "mdns", address: "printer.local" }); // never resolved
+  upsertRecord(registry, "kitchen-lamp", { transport: "dirigera", address: "dev-1", meta: { isOn: true } });
+
+  const listRes = fakeResponse();
+  handleList(registry, {}, {}, listRes);
+  const records = JSON.parse(listRes.body);
+  assert.equal(records.find((r) => r.name === "raspi3").resolvedAddress, "192.168.1.53");
+  assert.equal("resolvedAddress" in records.find((r) => r.name === "printer"), false);
+  assert.equal("resolvedAddress" in records.find((r) => r.name === "kitchen-lamp"), false);
+
+  const getRes = fakeResponse();
+  handleGet(registry, {}, "raspi3", {}, getRes);
+  assert.equal(JSON.parse(getRes.body).resolvedAddress, "192.168.1.53");
+});
+
 test("handleGet includes the same curated display lines for a single record", () => {
   const registry = createRegistry();
   upsertRecord(registry, "weather-station", {

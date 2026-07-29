@@ -1635,6 +1635,51 @@ the very first live poll: `GET /devices/flower-care` returned
 exercised against in any test, only in the wild. `node --test
 test/run-all.js`: 215 pass, 1 pre-existing skip, 0 failing.
 
+**A real, user-reported regression ("resolved names is now ok, but
+discovered devices mdns via proxy is not") led to a genuine, previously
+untested bug affecting every single `mdns`-transport playlist entry, not
+just the one being investigated.** Adding `resolvedAddress` to
+`GET /devices` (so `/screens/devices` doesn't require knowing
+`/screens/resolved` exists separately) surfaced that a real playlist
+entry never resolved at all -- `mDNS resolution failed for
+meterkast-proxy: mDNS via proxy http://192.168.1.52:80: no A or AAAA
+record found for meterkast-proxy.local`. Checking `GET /resolved`
+directly showed *zero* `mdns`-transport entries resolving, only `dns`
+ones -- a much broader failure than one hostname. Root cause, found by
+comparing a real live `/scan/mdns` dump from the C6 board against
+`resolveViaProxy`'s own matching logic: the proxy's own mDNS browser
+reports a plain hostname's A record with a **bare** hostname (confirmed
+live: `"hostname":"meterkast-proxy"`, not `"meterkast-proxy.local"`),
+but every playlist address keeps the `.local` suffix this project's own
+README establishes as the convention (`printer.local`). `resolveViaProxy`
+compared them with no normalization -- an exact-match that could never
+succeed. The service-query branch three lines above already stripped
+`.local` before comparing; the plain-hostname branch never got the same
+treatment. `unclaimedMdnsCandidates`'s own "already claimed" check had
+the identical bug, one function up -- meaning an already-claimed mDNS
+device could never be recognized as claimed on the Discover screen,
+always reappearing as "new." Both fixed with the same `.local`-strip
+normalization. The reason this survived undetected: `test/fixtures/
+proxy-mdns-scan.json`, the fixture every one of these tests exercises
+against, itself used `.local`-suffixed hostnames (`"homeassistant.local"`)
+-- not what real firmware actually reports -- so an exact-match
+comparison against a wrong-shaped fixture happened to pass while
+silently failing against every real board. Fixed the fixture to match
+real observed proxy output (bare hostnames), which is what actually
+caught the previously-invisible bug once the two adapter functions were
+fixed to match. Also reordered `METERKAST_PROXY_HOSTS` in `.env` (a
+separate, real, non-code cause): the M5StickC's own mDNS cache was
+completely empty (`mdnsDeviceCount:0` after 2+ hours of uptime, `GET
+/scan/mdns` returning `[]`) while the C6's was healthy (14 real
+entries) -- resolveViaProxy only ever queries the *first* configured
+proxy for already-claimed entries, so the daemon was asking the one
+board with nothing cached. Live-verified end to end after all three
+fixes: `GET /resolved` now shows `meterkast-proxy` (and a second,
+previously-broken entry, `WDMyCloud`) with real resolved IPs. `node
+--test test/run-all.js`: 216 pass, 1 pre-existing skip, 0 failing (one
+existing test's expectations updated to match the corrected fixture, one
+new regression test added documenting the exact incident).
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
