@@ -114,16 +114,31 @@ stock-xiaomi-thermometer.address   = "C4:7C:8D:11:22:33"
 stock-xiaomi-thermometer.deviceType = "sig-thermometer"
 stock-xiaomi-thermometer.proxyUrl   = "http://192.168.1.52"
 
-# "mibeacon": Xiaomi's own native MiBeacon advertisement format (service
-# data UUID 0xfe95) -- stock Xiaomi firmware, or ATC/pvvx custom firmware
-# set to "Mi Like" advertising instead of its own atc1441/pvvx-custom
-# formats. Advertisement-only, same as bthome-v2 -- no GATT connection.
-# proxyUrl points at a second board here to show multiple proxies are
-# just multiple entries pointing at different boards, nothing special.
+# "atc-pvvx": ATC1441/pvvx custom thermometer firmware's own native
+# advertisement format (service data UUID 0x181a) -- the richest of the
+# advertisement profiles for a device running this firmware: temperature,
+# humidity, battery percent, and battery voltage all arrive in one packet
+# every cycle. This same real device also broadcasts Xiaomi's native
+# MiBeacon format concurrently under 0xfe95 (deviceType "mibeacon") --
+# either works, atc-pvvx just needs no round-robin wait for a full
+# reading. proxyUrl points at a second board here to show multiple
+# proxies are just multiple entries pointing at different boards,
+# nothing special.
 garage-thermometer.transport = "ble-gatt"
 garage-thermometer.address   = "A4:C1:38:F2:8A:FA"
-garage-thermometer.deviceType = "mibeacon"
-garage-thermometer.proxyUrl   = "http://192.168.1.174"
+garage-thermometer.deviceType = "atc-pvvx"
+garage-thermometer.proxyUrl   = "http://192.168.1.52"
+
+# "mibeacon": a second real device, this one currently in Xiaomi's native
+# Mi Home advertising mode rather than pvvx custom mode -- same custom
+# ATC firmware (name still reads "ATC_..."), just a different advertising
+# format selected on it. Nothing stops the same deviceType from being
+# reused across as many playlist entries as there are real devices
+# speaking it.
+koelkast-thermometer.transport = "ble-gatt"
+koelkast-thermometer.address   = "A4:C1:38:70:D9:33"
+koelkast-thermometer.deviceType = "mibeacon"
+koelkast-thermometer.proxyUrl   = "http://192.168.1.174"
 
 # Address prefixes (or full addresses) to drop from every BLE discovery
 # screen (proxy-scanned and this machine's own Windows Bluetooth alike) --
