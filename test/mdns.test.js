@@ -191,7 +191,19 @@ async function loadProxyMdnsFixture() {
   return JSON.parse(await readFile(join(FIXTURES_DIR, "proxy-mdns-scan.json"), "utf8"));
 }
 
-test("resolveViaProxy resolves a plain hostname from the proxy's own cached /scan/mdns", async () => {
+// Real, confirmed-live incident: a claimed mdns entry's own address keeps
+// the ".local" suffix every other entry in this project's playlist uses
+// (README's own convention, "printer.local") -- but a real proxy board's
+// own /scan/mdns reports a plain hostname's A record with a *bare*
+// hostname instead (confirmed live: "meterkast-proxy", not
+// "meterkast-proxy.local"). An earlier version of resolveViaProxy/this
+// fixture both assumed the ".local" suffix would be present on both
+// sides, which happened to make an exact-match comparison pass in tests
+// while silently failing to resolve *every* mdns-transport playlist
+// entry against real hardware -- caught only by noticing /resolved
+// showed zero mdns entries live, not by any test. The fixture below now
+// matches real observed proxy output (bare hostnames) on purpose.
+test("resolveViaProxy resolves a .local-suffixed playlist address against the proxy's own bare-hostname A record", async () => {
   const fixture = await loadProxyMdnsFixture();
   const server = await startFakeProxyServer({ "/scan/mdns": fixture });
   const { port } = server.address();
@@ -213,7 +225,12 @@ test("resolveViaProxy resolves a service query by matching serviceType, txt alwa
 
   try {
     const result = await resolveViaProxy(proxyUrl, "_googlecast._tcp.local");
-    assert.deepEqual(result, { instanceName: "chromecast-abcd.local", host: "192.168.1.60", port: 8009, txt: {} });
+    // instanceName is a bare hostname here, not a full DNS-SD instance
+    // name -- unlike resolveService's own PTR-answer-derived instanceName
+    // (see the other instanceName test above), this one just echoes back
+    // whatever hostname the proxy's own /scan/mdns reported, confirmed
+    // live to be bare (no ".local").
+    assert.deepEqual(result, { instanceName: "chromecast-abcd", host: "192.168.1.60", port: 8009, txt: {} });
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

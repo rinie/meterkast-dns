@@ -42,7 +42,19 @@ function withDisplay(record, displayFields) {
     include: record.displayFields,
     exclude: record.excludeDisplayFields,
   });
-  return { ...record, display: shown, displayHidden: hidden };
+  // Same dns/mdns-only, live-resolved-or-omitted value /resolved already
+  // computes (see summarizeResolution below) -- surfaced here too so
+  // /screens/devices doesn't require knowing a second page exists just to
+  // see what a Use-typed hostname actually resolved to. Omitted (not
+  // `null`) when there's nothing real to show, matching every other
+  // "only show what's real" spot in this file.
+  const resolvedAddress = summarizeResolution(record);
+  return {
+    ...record,
+    ...(resolvedAddress ? { resolvedAddress } : {}),
+    display: shown,
+    displayHidden: hidden,
+  };
 }
 
 export function handleList(registry, displayFields, req, res) {
