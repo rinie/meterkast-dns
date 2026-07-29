@@ -88,3 +88,36 @@ address   = "AA:BB:CC:DD:EE:FF"
 [devices.kitchen-thermometer.readings]
 temperature = { service = "health-thermometer", characteristic = "temperature-measurement" }
 battery     = { service = "battery-service",     characteristic = "battery-level" }
+
+# transport: "ble-gatt" -- read via a real meterkast-proxy ESP32 board
+# (proxyUrl), not this machine's own local BLE. All device-specific
+# knowledge (which UUIDs, which decode math) lives in
+# src/adapters/ble-gatt-profiles.js, keyed by deviceType -- the ESP32's
+# own firmware knows nothing about either device below, only "connect and
+# read this characteristic" / "here are the raw advertisement bytes". See
+# README.md "Extending to BLE GATT via a proxy board".
+#
+# "bthome-v2": an advertisement-only device (pvvx ATC_MiThermometer custom
+# firmware, or anything else broadcasting BTHome v2) -- no GATT connection
+# at all, just the raw service-data bytes the proxy's passive scan already
+# captures every cycle. address is the device's real MAC.
+living-room-thermometer.transport = "ble-gatt"
+living-room-thermometer.address   = "A4:C1:38:AA:BB:CC"
+living-room-thermometer.deviceType = "bthome-v2"
+living-room-thermometer.proxyUrl   = "http://192.168.1.52"
+
+# "sig-thermometer": a standard Bluetooth SIG Health Thermometer GATT
+# profile -- the proxy connects, reads the Temperature Measurement
+# characteristic, and disconnects each cycle.
+stock-xiaomi-thermometer.transport = "ble-gatt"
+stock-xiaomi-thermometer.address   = "C4:7C:8D:11:22:33"
+stock-xiaomi-thermometer.deviceType = "sig-thermometer"
+stock-xiaomi-thermometer.proxyUrl   = "http://192.168.1.52"
+
+# Address prefixes (or full addresses) to drop from every BLE discovery
+# screen (proxy-scanned and this machine's own Windows Bluetooth alike) --
+# e.g. a neighbor's solar inverter that keeps showing up in scans. This
+# lives here, not on the ESP32: the proxy board still sees and reports
+# these devices, they're just filtered out of "what's new" before you'd
+# ever have to look at them. See README.md "BLE discovery blacklist".
+bleIgnore = ["DE:AD:BE:EF:00:"]

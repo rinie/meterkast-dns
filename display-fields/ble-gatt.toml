@@ -1,0 +1,22 @@
+# Curated flat display fields for transport: "ble-gatt" -- flat, not
+# deviceType-keyed, because every profile in ble-gatt-profiles.js already
+# normalizes its decode() output to the same field names (temperature,
+# humidity, battery) regardless of which physical protocol (BTHome v2
+# advertisement, SIG Health Thermometer GATT) actually produced the
+# reading -- see ecowitt.toml/matter.toml for the same flat-vs-deviceType
+# reasoning, and ble-gatt-profiles.js for where the normalization happens.
+# valuePath is a dot-path into a device's own `meta` object.
+[[fields]]
+label     = "Temperature"
+valuePath = "temperature"
+unit      = "C"
+
+[[fields]]
+label     = "Humidity"
+valuePath = "humidity"
+unit      = "%"
+
+[[fields]]
+label     = "Battery"
+valuePath = "battery"
+unit      = "%"

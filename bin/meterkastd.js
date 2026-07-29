@@ -12,6 +12,7 @@ import mdnsAdapter, { discoverMdnsViaProxies, unclaimedMdnsCandidates } from "..
 import dnsAdapter, { scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from "../src/adapters/dns-adapter.js";
 import { parseProxyHosts, discoverBleViaProxies, unclaimedProxyBleDevices } from "../src/adapters/proxy-adapter.js";
 import matterAdapter from "../src/adapters/matter-adapter.js";
+import bleGattProxyAdapter from "../src/adapters/ble-gatt-proxy-adapter.js";
 import { listWindowsUsbDevices, unclaimedWindowsUsbDevices } from "../src/adapters/usb-windows-adapter.js";
 import {
   listWindowsPairedBluetoothDevices,
@@ -41,7 +42,13 @@ const playlist = await readPlaylist(playlistPath).catch((error) => {
   }
   return {};
 });
-const { devices, ...flatEntries } = playlist;
+// bleIgnore: address prefixes (or full addresses) to drop from every BLE
+// discovery source below -- reserved alongside `devices`, not a device
+// record itself, same reasoning that already carves `devices` out of
+// flatEntries. Lives entirely in the playlist by design (see
+// ble-ignore.js) -- the ESP32 proxy keeps reporting these devices, they
+// just never surface as "unclaimed" candidates here.
+const { devices, bleIgnore = [], ...flatEntries } = playlist;
 for (const [name, record] of Object.entries(flatEntries)) {
   upsertRecord(registry, name, record);
 }
@@ -67,6 +74,7 @@ const pollingAdapters = [
   ["mdns", "mDNS", mdnsAdapter, proxyUrls.length > 0 ? { proxyUrl: proxyUrls[0] } : {}],
   ["dns", "DNS", dnsAdapter, {}],
   ["matter", "Matter", matterAdapter, {}],
+  ["ble-gatt", "BLE GATT", bleGattProxyAdapter, {}],
 ];
 for (const [transport, label, adapterFn, options] of pollingAdapters) {
   runPollingAdapter(registry, transport, adapterFn, options).catch((error) => {
@@ -157,11 +165,11 @@ const discover = {
   // force the fast path to always pay the slow path's cost.
   "bluetooth-paired": async () => {
     const pnpDevices = await listWindowsPairedBluetoothDevices();
-    return unclaimedPairedBluetoothDevices(pnpDevices, recordsAsObject(registry));
+    return unclaimedPairedBluetoothDevices(pnpDevices, recordsAsObject(registry), bleIgnore);
   },
   "bluetooth-nearby": async () => {
     const rawDevices = await listWindowsNearbyBluetoothDevices();
-    return unclaimedNearbyBluetoothDevices(rawDevices, recordsAsObject(registry));
+    return unclaimedNearbyBluetoothDevices(rawDevices, recordsAsObject(registry), bleIgnore);
   },
   // The other half of the "mDNS via proxy is a setting, not a transport"
   // design (see mdns-adapter.js) -- this is the browse-for-unclaimed
@@ -186,7 +194,7 @@ const discover = {
       throw new Error("Proxy BLE discovery needs METERKAST_PROXY_HOSTS set in .env (see README.md)");
     }
     const rawByProxy = await discoverBleViaProxies(proxyUrls);
-    return unclaimedProxyBleDevices(rawByProxy, recordsAsObject(registry));
+    return unclaimedProxyBleDevices(rawByProxy, recordsAsObject(registry), bleIgnore);
   },
 };
 

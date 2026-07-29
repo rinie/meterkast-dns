@@ -24,6 +24,7 @@
 // browser-triggered WebBluetooth GATT read), so its proxy-discovery
 // logic stays here.
 import { log } from "../core/log.js";
+import { isBleIgnored } from "./ble-ignore.js";
 
 function slugify(text) {
   return text
@@ -48,15 +49,18 @@ export function parseProxyHosts(envValue) {
     .map((host) => (host.includes(":") ? `http://${host}` : `http://${host}:80`));
 }
 
-// Exported: mdns-adapter.js's own proxy-resolution mode reuses this same
-// fetch-and-parse helper rather than duplicating it -- the one
-// deliberate cross-adapter import in this project so far, worth calling
-// out as such rather than leaving it looking accidental. Both files are
+// Exported: mdns-adapter.js's own proxy-resolution mode, and now
+// ble-gatt-proxy-adapter.js's generic relay calls, reuse this same
+// fetch-and-parse helper rather than duplicating it. All three are
 // really talking to the same kind of thing (a proxy's small JSON API),
-// just for different purposes (BLE discovery here, mDNS resolution
-// there).
-export async function fetchProxyJson(baseUrl, path) {
-  const res = await fetch(`${baseUrl}${path}`);
+// just for different purposes. `body`, when given, POSTs it as JSON
+// (the shape POST /gatt/session needs) instead of a plain GET.
+export async function fetchProxyJson(baseUrl, path, body) {
+  const res = await fetch(`${baseUrl}${path}`, body === undefined ? undefined : {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) throw new Error(`${baseUrl}${path} returned HTTP ${res.status}`);
   return res.json();
 }
@@ -87,7 +91,7 @@ export async function discoverBleViaProxies(proxyUrls) {
 // transport stays "bluetooth" -- the same value the Windows-native
 // paired/nearby scans and web-scan.html's own WebBluetooth flow already
 // use.
-export function unclaimedProxyBleDevices(rawDevicesByProxy, configuredRecords) {
+export function unclaimedProxyBleDevices(rawDevicesByProxy, configuredRecords, ignoreList = []) {
   const claimed = new Set(
     Object.values(configuredRecords)
       .filter((record) => record.transport === "bluetooth")
@@ -98,6 +102,7 @@ export function unclaimedProxyBleDevices(rawDevicesByProxy, configuredRecords) {
     for (const device of devices) {
       const address = device.address.toUpperCase();
       if (claimed.has(address)) continue;
+      if (isBleIgnored(address, ignoreList)) continue;
       candidates.push({
         transport: "bluetooth",
         address,

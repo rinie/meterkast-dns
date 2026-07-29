@@ -1323,6 +1323,128 @@ PKI handshake, persistent credential-grade storage, a firewall
 collision, and currently sees only 1 of the same 23 devices. Both reach
 the same hub; the paths could not be more different in weight.
 
+**The `ble-gatt` transport (a generic relay through a real `meterkast-proxy`
+ESP32 board) is real, split across two repos, and both halves are
+verified — one against real flashed hardware, one against 192 real
+passing tests.** This recovers a design that already existed in this
+repo's own git history: `src/adapters/ble-gatt/*` (deleted in commit
+`2529fc6` when `@abandonware/noble` was dropped for being a native
+`node-gyp` dependency — see "WebBLE/WebUSB instead of a native binding"
+in README.md) already had exactly this shape — a pure, noble-independent
+decoder for IEEE-11073 Temperature Measurement and Weight Measurement,
+and a semantic UUID registry. It was removed because its *connection*
+mechanism was the problem, not the decode logic; pointing that same
+decode logic at a real ESP32 proxy instead of `noble` is what this PR
+does. Explicitly redirected mid-planning by the user: the Medisana
+scale's more complex write-then-wait-for-indication protocol can wait —
+build the simpler read-only relay first, prioritize two real
+thermometers already on hand, and add a BLE blacklist entirely in the
+playlist, not the firmware.
+
+**meterkast-proxy side (the generic relay itself)**: `gatt_session.cpp`'s
+`gattSessionExecute` is a bounded-timeout NimBLE connect
+(`setConnectTimeout(5000)`, `connectFailRetries = 0`), reading each
+requested characteristic by UUID and hex-encoding the bytes, then
+disconnecting — no scale-specific write/subscribe/wait logic at all
+(that code, `scale_reader.h`/`.cpp`, was deleted outright in this same
+PR, not left dormant). `ble_scanner.cpp`'s existing continuous passive
+scan was extended to also capture each advertisement's raw Service Data
+AD structures (`NimBLEAdvertisedDevice::haveServiceData()`/
+`getServiceDataCount()`/`getServiceData(i)`/`getServiceDataUUID(i)`,
+confirmed against the real installed NimBLE headers before writing, same
+discipline as every other NimBLE call in this project) into the existing
+per-device cache, surfaced as a new `serviceData` object on `/scan/ble` —
+free, since the scan already received these bytes and previously just
+discarded them. One real, confirmed-live fact that shaped the Node-side
+matching code below: `NimBLEUUID::toString()` on this hardware/library
+version renders a 16-bit UUID as `"0xfcd2"` (lowercase, `0x`-prefixed),
+not bare `"fcd2"`. Real build (PlatformIO): flash usage 89.4% vs. `main`'s
+own 89.8% baseline — a net *improvement* despite adding a new endpoint,
+because the removed scale-protocol code was larger than what replaced
+it. Flashed for real to the M5StickC board at `192.168.1.52` and
+live-tested: `GET /ble/discover?prefix=` returned 200 OK; `POST
+/gatt/session` against a deliberately unreachable address returned a
+clean `{"ok":false,"error":"connect failed"}` rather than hanging or
+crashing; `GET /scan/ble` showed real, live-captured `serviceData`
+including a genuine nearby Xiaomi UUID (`0xfe95`) already in range —
+incidental proof the capture mechanism itself works, not a reading from
+either target thermometer specifically (neither's MAC was in range
+during this pass). Shipped as
+[meterkast-proxy#8](https://github.com/rinie/meterkast-proxy/pull/8).
+
+**meterkast-dns side (the playlist-facing profile registry + adapter)**:
+`decodeTemperatureMeasurement`/`decodeWeightMeasurement`/
+`known-services.js`/`known-characteristics.js` were resurrected verbatim
+from `2529fc6~1` — real, previously-tested code, not rewritten from
+scratch. `decode-bthome.js` is a new parser for the
+[BTHome v2 spec](https://bthome.io/format/) (bthome.io/format/) — a real,
+officially documented, self-describing format (`{objectId, fixed-length
+value}` pairs; an unrecognized objectId stops parsing outright, since
+there's no generic length prefix to skip past it with), tested against
+11 real spec-example byte sequences, not invented ones. A real
+floating-point bug surfaced building those tests:
+`raw * factor` (e.g. `2506 * 0.01`) produced `25.060000000000002` rather
+than `25.06` from ordinary IEEE 754 binary imprecision — fixed with
+`Math.round(raw * factor * 1e6) / 1e6`.
+
+`ble-gatt-profiles.js` is the actual "specific mapping" the user asked
+for: `bthome-v2` (advertisement-kind, `serviceDataUuid: "fcd2"`) and
+`sig-thermometer` (gatt-kind, `KNOWN_SERVICES`/`KNOWN_CHARACTERISTICS`
+by name) — the latter's `decode()` deliberately normalizes its raw
+`{value, unit}` output down to a bare, always-Celsius `temperature`
+field (converting Fahrenheit if the flags byte ever reports it), so
+`bthome-v2` and `sig-thermometer` report the exact same field names
+despite being two structurally different physical protocols — the same
+move that keeps `display-fields/ble-gatt.toml` a flat catalog instead of
+one keyed by `deviceType`.
+
+**A real hung-process bug, caught and fixed before it could ship.**
+`ble-gatt-proxy-adapter.js`'s polling generator raced two hung
+`node.exe` processes (confirmed via `Get-Process -Name node`, killed via
+`Stop-Process -Force`) while its own tests were being written — a
+record whose read path never reaches a `yield` (an unknown `deviceType`,
+or a device not currently visible in the scan) means an async
+generator's own `.return()` never takes effect, since `.return()` only
+applies at the next `yield` point; the generator's `while (true)` +
+`setTimeout(intervalMs)` loop just kept running forever underneath a
+test that had already moved on. Diagnosed with an isolated,
+throwaway debug script proving `.return()` was called but its own "done"
+log line never printed while the loop kept logging warnings
+underneath it. Fixed by extraction, not by fighting the generator:
+`readBleGattRecord(name, record)` is a plain, non-generator `async`
+function doing one attempt with no loop at all, directly testable
+(`await` once, assert, done — no teardown risk whatsoever); the
+generator wrapper is now only exercised by scenarios that *do* reach a
+real `yield`, where `.return()` genuinely is safe.
+
+**The BLE blacklist (`bleIgnore`) is real, tested, and applied at every
+BLE discovery source, not just the proxy one.** `isBleIgnored` (a small,
+new `ble-ignore.js`) does a case-insensitive prefix match — one entry
+like `"DE:AD:BE:EF:00:"` covers an entire vendor OUI block, not just one
+exact address. Wired into `unclaimedProxyBleDevices` (`proxy-adapter.js`)
+*and* both `unclaimedPairedBluetoothDevices`/
+`unclaimedNearbyBluetoothDevices` (`bluetooth-windows-adapter.js`) —
+deliberately consistent across all three, on the reasoning that one
+ignore list should mean "ignore everywhere," not just wherever it was
+first requested. `bin/meterkastd.js` reads the playlist's top-level
+`bleIgnore` array the same way it already carves the reserved `devices`
+key out of the flat-entries loop, then threads it through to all three
+discover functions. Real test coverage for the actual scenario the user
+named (a fixture device matching an ignore prefix, confirmed excluded)
+exists for all three sources, not just one.
+
+`node --test test/run-all.js`: 192 pass, 1 pre-existing skip, 0 failing —
+every new piece above (`decode-bthome.js`, the resurrected decoders,
+`ble-gatt-proxy-adapter.js`/`readBleGattRecord`, `isBleIgnored`, and the
+blacklist-filtering behavior of all three `unclaimed*BleDevices`/
+`unclaimed*BluetoothDevices` functions) is covered. **Not yet
+live-verified against either real physical thermometer specifically**
+(the stock Xiaomi or the BTHome-v2-modified one) — neither's real MAC
+has been brought in range of the flashed proxy board yet in a
+`/scan/ble`/`/gatt/session` pass; that remains the first real-hardware
+check once both devices are in range, the same honest-gap discipline
+this document already applies to Dirigera-style hardware elsewhere.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via

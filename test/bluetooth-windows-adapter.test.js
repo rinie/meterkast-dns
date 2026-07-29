@@ -68,6 +68,17 @@ test("unclaimedPairedBluetoothDevices excludes an already-claimed address, sugge
   ]);
 });
 
+test("unclaimedPairedBluetoothDevices excludes a device matching a bleIgnore prefix", async () => {
+  const pnpDevices = await loadPairedFixture();
+
+  const candidates = unclaimedPairedBluetoothDevices(pnpDevices, {}, ["99:42:BF:"]);
+
+  assert.deepEqual(
+    candidates.map((c) => c.address),
+    ["54:15:89:9A:7D:66"],
+  );
+});
+
 test("listWindowsPairedBluetoothDevices rejects on a non-Windows platform with a clear message", () =>
   withPlatform("linux", () =>
     assert.rejects(() => listWindowsPairedBluetoothDevices({ exec: async () => ({ stdout: "[]" }) }), /Windows-only/),
@@ -109,6 +120,15 @@ test("unclaimedNearbyBluetoothDevices excludes an already-claimed address, falls
   assert.equal(blankNamed.suggestedName, "bluetooth-16CB1937777F");
   const named = candidates.find((c) => c.address === "D2:AD:08:F3:F7:AE");
   assert.equal(named.suggestedName, "smart-tank-7300-series");
+});
+
+test("unclaimedNearbyBluetoothDevices excludes devices matching a bleIgnore prefix", async () => {
+  const rawDevices = await loadNearbyFixture();
+
+  const candidates = unclaimedNearbyBluetoothDevices(rawDevices, {}, ["A4:C1:38:"]);
+
+  assert.ok(!candidates.some((c) => c.address === "A4:C1:38:70:D9:33"));
+  assert.equal(candidates.length, 5);
 });
 
 test("listWindowsNearbyBluetoothDevices rejects on a non-Windows platform with a clear message", () =>

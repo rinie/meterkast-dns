@@ -379,6 +379,90 @@ actually implemented here" for exactly which parts are real and tested
 (the UUID resolvers, the decoders, the nested-to-flat playlist loading) and
 which one remains unverified against real hardware (the actual BLE scan).
 
+### Extending to BLE via a proxy board (meterkast-proxy, generic GATT relay + BTHome v2)
+
+The BLE GATT section above is WebBLE, in-browser — it needs a Chromium tab
+open and connected (see "WebBLE/WebUSB instead of a native binding" below).
+`transport = "ble-gatt"` is a second, always-on path to the same class of
+device, going through a real ESP32 board (the separate `meterkast-proxy`
+repo) instead: a small NimBLE-based firmware that does exactly two generic
+things and nothing device-specific — connect and read one or more GATT
+characteristics (`POST /gatt/session`), and continuously capture the raw
+Service Data bytes every nearby BLE advertisement already broadcasts
+(`GET /scan/ble`). Neither endpoint knows or cares what any of those bytes
+*mean* — that's deliberate, and mirrors the same Use/Def boundary this
+whole design draws everywhere else: the compiled firmware is Gutenberg
+(bytes in, bytes out), and every device-specific mapping — which UUID,
+which decode math, what a given manufacturer's objectId table looks like —
+lives entirely in this repo's playlist-facing code, never on the ESP32.
+
+`src/adapters/ble-gatt-profiles.js` holds that mapping, keyed by a
+`deviceType` string:
+
+```toml
+living-room-thermometer.transport  = "ble-gatt"
+living-room-thermometer.address    = "A4:C1:38:AA:BB:CC"
+living-room-thermometer.deviceType = "bthome-v2"
+living-room-thermometer.proxyUrl   = "http://192.168.1.52"
+
+stock-xiaomi-thermometer.transport  = "ble-gatt"
+stock-xiaomi-thermometer.address    = "C4:7C:8D:11:22:33"
+stock-xiaomi-thermometer.deviceType = "sig-thermometer"
+stock-xiaomi-thermometer.proxyUrl   = "http://192.168.1.52"
+```
+
+Two real, different BLE mechanisms live behind that one `deviceType`
+knob, matching the two things the proxy actually exposes:
+
+- **`"advertisement"` profiles** (`bthome-v2`) need no GATT connection at
+  all — [BTHome v2](https://bthome.io/format/) is a real, officially
+  documented, self-describing sensor format (temperature, humidity,
+  battery, and more, all in one `{objectId, fixed-length value}` sequence
+  under advertisement UUID `0xFCD2`) that a modified thermometer
+  (`pvvx/ATC_MiThermometer` custom firmware) broadcasts continuously —
+  the proxy's own passive scan already sees these bytes every cycle, so
+  reading one is just decoding what `/scan/ble` already returned.
+- **`"gatt"` profiles** (`sig-thermometer`) connect, read, and disconnect
+  each cycle — this is the same standard Bluetooth SIG Health Thermometer
+  characteristic (`0x2A1C`) the WebBLE section above already resolves by
+  name, just reached through the proxy's `POST /gatt/session` instead of
+  a browser tab.
+
+Every profile's `decode()` normalizes its output to the same flat field
+names (`temperature`, `humidity`, `battery`, always Celsius) regardless of
+which physical mechanism produced the reading, so `display-fields/ble-gatt.toml`
+can stay a flat catalog rather than one keyed by `deviceType` — the same
+flat-vs-keyed reasoning as `ecowitt.toml` vs. `dirigera.toml` (see
+"Flattening nested readings for display" below), just decided at the
+profile layer instead of the display layer this time.
+
+**BLE discovery blacklist.** A proxy board's passive scan sees every BLE
+device in range, not just yours — a neighbor's solar inverter, say, that
+keeps showing up on `/screens/discover`'s BLE panel with nothing to do
+about it. A top-level `bleIgnore` array in `device-playlist.toml` names
+address prefixes (or full addresses) to drop from *every* BLE discovery
+source — the proxy's own scan and this machine's native Windows Bluetooth
+scans alike — before they're ever shown as a candidate:
+
+```toml
+bleIgnore = ["DE:AD:BE:EF:00:"]   # a whole vendor's OUI block, or a full address
+```
+
+This lives here, in the playlist, on purpose — not on the ESP32. The
+proxy board keeps scanning and reporting every device it sees regardless;
+`bleIgnore` only filters what meterkast-dns itself surfaces as "new."
+That split matters for the same reason the rest of this design keeps
+device-specific knowledge off the firmware: a household's own "ignore
+this neighbor's device" preference is exactly that, a per-installation
+preference, not something worth reflashing a board over.
+
+**Deferred, not built here**: a Medisana-style BLE scale's real protocol
+(write a trigger byte, subscribe to a GATT indication, wait for the
+device's own asynchronous notify) — a strict superset of the read-only
+relay above, additive whenever it's warranted. See IMPLEMENTATION.md for
+the real build/flash/live verification of both the firmware and this
+adapter.
+
 ### WebBLE/WebUSB instead of a native binding
 
 An earlier version of this design used `@abandonware/noble`, a native
