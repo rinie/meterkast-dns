@@ -92,6 +92,18 @@ test("unclaimedProxyBleDevices uppercases the address, excludes an already-claim
   ]);
 });
 
+test("unclaimedProxyBleDevices excludes a device matching a bleIgnore prefix", async () => {
+  const bleFixture = await loadBleFixture();
+  const rawByProxy = { "http://proxy-a": bleFixture };
+
+  const candidates = unclaimedProxyBleDevices(rawByProxy, {}, ["11:22:33:"]);
+
+  assert.deepEqual(
+    candidates.map((c) => c.address),
+    ["AA:BB:CC:DD:EE:FF"],
+  );
+});
+
 test("unclaimedProxyBleDevices suggests a slugified name when the device advertised one", async () => {
   const rawByProxy = { "http://proxy-a": [{ address: "aa:bb:cc:dd:ee:ff", name: "Oven", rssi: -62, ageMs: 1200 }] };
 

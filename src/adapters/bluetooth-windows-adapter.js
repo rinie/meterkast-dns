@@ -29,6 +29,7 @@
 // starting "IAsyncOperation").
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { isBleIgnored } from "./ble-ignore.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -114,10 +115,10 @@ export function parsePairedBluetoothDevices(pnpDevices) {
   return [...byAddress.values()];
 }
 
-export function unclaimedPairedBluetoothDevices(pnpDevices, configuredRecords) {
+export function unclaimedPairedBluetoothDevices(pnpDevices, configuredRecords, ignoreList = []) {
   const claimed = claimedBluetoothAddresses(configuredRecords);
   return parsePairedBluetoothDevices(pnpDevices)
-    .filter((device) => !claimed.has(device.address))
+    .filter((device) => !claimed.has(device.address) && !isBleIgnored(device.address, ignoreList))
     .map(toCandidate);
 }
 
@@ -194,9 +195,9 @@ export function parseNearbyBluetoothDevices(rawDevices) {
   return [...byAddress.values()];
 }
 
-export function unclaimedNearbyBluetoothDevices(rawDevices, configuredRecords) {
+export function unclaimedNearbyBluetoothDevices(rawDevices, configuredRecords, ignoreList = []) {
   const claimed = claimedBluetoothAddresses(configuredRecords);
   return parseNearbyBluetoothDevices(rawDevices)
-    .filter((device) => !claimed.has(device.address))
+    .filter((device) => !claimed.has(device.address) && !isBleIgnored(device.address, ignoreList))
     .map(toCandidate);
 }
