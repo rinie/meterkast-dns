@@ -17,9 +17,9 @@
 // bit is set) + one {Object ID (2 bytes), Length (1 byte), Data} triplet
 // -- which optional fields are present is entirely gated by Frame
 // Control's own bit flags, so nothing here is a fixed offset. A device
-// round-robins which single value (temperature/humidity/battery/...) it
-// reports each cycle -- most individual advertisements legitimately
-// decode only one field, not a failure.
+// round-robins which Object it reports each cycle (temperature+humidity
+// combined, battery, ...) -- most individual advertisements legitimately
+// decode a different subset of fields than the last one, not a failure.
 const FRAME_CONTROL_ENCRYPTED = 1 << 3;
 const FRAME_CONTROL_HAS_MAC = 1 << 4;
 const FRAME_CONTROL_HAS_CAPABILITY = 1 << 5;
@@ -35,6 +35,14 @@ const OBJECT_TYPES = {
   0x1006: { name: "humidity", bytes: 2, signed: false, factor: 0.1 },
   0x100a: { name: "battery", bytes: 1, signed: false, factor: 1 },
 };
+
+// A real device on this network (a4:c1:38:f2:8a:fa) turned out to
+// report temperature and humidity combined in a single Object rather
+// than as two separate 0x1004/0x1006 ones -- confirmed against a real
+// captured frame (int16 LE temperature x0.1C followed directly by
+// uint16 LE humidity x0.1%, 4 bytes total), not in the single-value
+// OBJECT_TYPES table above since it produces two fields from one object.
+const OBJECT_ID_TEMPERATURE_HUMIDITY = 0x100d;
 
 function readInt(buffer, offset, bytes, signed) {
   return signed ? buffer.readIntLE(offset, bytes) : buffer.readUIntLE(offset, bytes);
@@ -73,10 +81,19 @@ export function decodeMibeacon(buffer) {
   const objectId = buffer.readUInt16LE(offset);
   const objectLen = buffer.readUInt8(offset + 2);
   if (offset + 3 + objectLen > buffer.length) return {}; // truncated
+  const dataOffset = offset + 3;
+
+  if (objectId === OBJECT_ID_TEMPERATURE_HUMIDITY) {
+    if (objectLen < 4) return {};
+    return {
+      temperature: applyFactor(readInt(buffer, dataOffset, 2, true), 0.1),
+      humidity: applyFactor(readInt(buffer, dataOffset + 2, 2, false), 0.1),
+    };
+  }
 
   const type = OBJECT_TYPES[objectId];
   if (!type || objectLen < type.bytes) return {};
 
-  const raw = readInt(buffer, offset + 3, type.bytes, type.signed);
+  const raw = readInt(buffer, dataOffset, type.bytes, type.signed);
   return { [type.name]: applyFactor(raw, type.factor) };
 }
