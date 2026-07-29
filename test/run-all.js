@@ -24,5 +24,6 @@ import "./proxy-adapter.test.js";
 import "./decode-temperature-measurement.test.js";
 import "./decode-weight-measurement.test.js";
 import "./decode-bthome.test.js";
+import "./decode-mibeacon.test.js";
 import "./ble-gatt-proxy-adapter.test.js";
 import "./ble-ignore.test.js";

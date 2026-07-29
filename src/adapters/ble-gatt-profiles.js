@@ -13,6 +13,7 @@
 //   before this runs, so a profile's own decode() never deals with hex
 //   strings directly).
 import { decodeBthome } from "./decode-bthome.js";
+import { decodeMibeacon } from "./decode-mibeacon.js";
 import { decodeTemperatureMeasurement } from "./decode-temperature-measurement.js";
 import { KNOWN_SERVICES } from "./known-services.js";
 import { KNOWN_CHARACTERISTICS } from "./known-characteristics.js";
@@ -28,6 +29,19 @@ export const BLE_GATT_PROFILES = {
     kind: "advertisement",
     serviceDataUuid: "fcd2",
     decode: (serviceData) => decodeBthome(serviceData),
+  },
+  // Xiaomi's own native MiBeacon protocol -- stock Xiaomi firmware, or
+  // ATC/pvvx custom firmware explicitly set to "Mi Like" advertising
+  // instead of its own atc1441/pvvx-custom formats. Its own UUID
+  // (0xfe95) is a Xiaomi vendor advertising UUID, not a Bluetooth SIG
+  // GATT service, same reasoning bthome-v2's 0xfcd2 isn't in
+  // known-services.js either. decodeMibeacon already normalizes to the
+  // same flat field names (temperature, humidity, battery) as every
+  // other profile here.
+  mibeacon: {
+    kind: "advertisement",
+    serviceDataUuid: "fe95",
+    decode: (serviceData) => decodeMibeacon(serviceData),
   },
   // A standard Bluetooth SIG Health Thermometer -- real, if this
   // project's own history is any guide, only for a device that actually

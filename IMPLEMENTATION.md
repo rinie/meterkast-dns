@@ -1445,6 +1445,52 @@ has been brought in range of the flashed proxy board yet in a
 check once both devices are in range, the same honest-gap discipline
 this document already applies to Dirigera-style hardware elsewhere.
 
+**Both companion PRs are merged, and the merge itself surfaced a real
+conflict worth recording.** meterkast-proxy's own PR (the firmware side
+of the work above) forked before an independent, concurrent session (on
+this project's second, toolchain-equipped laptop) merged its own
+Matter-thermometer-bridge PR into `main` — real overlapping edits to
+`ble_scanner.cpp`/`ble_scanner.h`/`web_server.cpp`/`meterkast-proxy.ino`/
+`README.md`. Resolved directly on the existing branch (not a new one —
+a standing rule now), via a real `git merge origin/main`: every code file
+auto-merged cleanly (confirmed by inspection — includes, route
+registrations, and `setup()`/`loop()` wiring all came out correct), only
+`README.md`'s endpoint table needed a hand reconciliation to keep both
+PRs' rows, plus fixing one claim ("no device-specific BLE knowledge
+lives in this firmware at all anymore") that the merge made false —
+`mija_thermometer.cpp` from the other PR does bake in real Xiaomi decode
+logic, deliberately, because a Matter accessory has to expose an
+already-decoded value with no meterkast-dns in the loop at all; reworded
+to scope that claim to the generic-relay (`m5stick-c`) path specifically.
+Both boards were independently confirmed booting the merged
+`main@336a11e` clean by the other session (M5StickC at `192.168.1.52`,
+ESP32-C6 at `192.168.1.174`) before either PR was merged here.
+
+**A second real device led directly to a third profile.** Inspecting a
+live `/scan/ble` capture from the newly-added C6 proxy
+(`192.168.1.174`, added to `METERKAST_PROXY_HOSTS` alongside the
+existing M5StickC) turned up `serviceData["0xfe95"]` on a real household
+device (`ATC_F28AFA`, `a4:c1:38:f2:8a:fa`) — Xiaomi's own native
+MiBeacon format, not BTHome v2. Hand-decoding those exact bytes against
+`meterkast-proxy`'s own already-verified `mija_thermometer.cpp` (written
+and confirmed live against this same device in the Matter-bridge PR
+above) gave a concrete, checkable answer: Frame Control `0x3050`
+(not encrypted, MAC included, no capability block, one Object present),
+Product ID `0x055B` (LYWSD03MMC family, a real confirmed product ID),
+and an Object `0x100A` (battery) with value `0x47` = 71% — the embedded,
+byte-reversed MAC in the frame matched the device's own advertised
+address exactly, confirming the decode was aligned correctly before any
+test was written. `decode-mibeacon.js`'s `decodeMibeacon` ports that same
+parser, extended to also decode battery (`0x100A`) alongside temperature
+(`0x1004`)/humidity (`0x1006`), since `display-fields/ble-gatt.toml`
+already has a battery field the firmware-side parser has no use for. 8
+new tests, one of them the real captured battery frame above (decoded by
+hand before the test was written, not invented), the rest hand-
+constructed from the same documented frame layout including three real
+edge cases the firmware parser itself guards against (encrypted frame,
+no Object present, a declared-but-truncated Object). `node --test
+test/run-all.js`: 200 pass, 1 pre-existing skip, 0 failing.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
