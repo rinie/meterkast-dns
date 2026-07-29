@@ -93,7 +93,7 @@ parallel. Fails clearly if `METERKAST_PROXY_HOSTS` isn't set -- no silent
 empty result.
 
 ```datatable
-{"discover": true, "endpoint": "/discover/mdns", "buttonLabel": "Scan mDNS (via proxy)", "columns": ["suggestedName", "address"]}
+{"discover": true, "endpoint": "/discover/mdns", "buttonLabel": "Scan mDNS (via proxy)", "columns": ["suggestedName", "address", "meta.ip", "meta.port", "meta.serviceType"], "header": {"meta.ip": "IP", "meta.port": "Port", "meta.serviceType": "Service"}}
 ```
 
 ## Bluetooth (via proxy)
