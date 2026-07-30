@@ -87,7 +87,14 @@ export async function createGrid(container, rows, { onSelect, onAction, columns,
   tableEl.style.width = "100%";
   container.append(tableEl);
 
-  const dtColumns = resolvedColumns.map((c) => ({ title: c.label, data: c.key ?? null, render: c.render }));
+  // defaultContent: "" -- DataTables throws ("Requested unknown
+  // parameter") rather than rendering blank when a column's own `data`
+  // key is *entirely absent* from a row object, not just undefined. Real
+  // case this hits: GET /devices only includes `resolvedAddress` on a
+  // dns/mdns record that's actually resolved (see server.js's own "only
+  // show what's real" omission, same as `display`/`displayHidden`), so
+  // every other transport's row genuinely has no such property at all.
+  const dtColumns = resolvedColumns.map((c) => ({ title: c.label, data: c.key ?? null, render: c.render, defaultContent: "" }));
   const sortIndex = sort ? resolvedColumns.findIndex((c) => c.key === sort) : -1;
   // Default page size = every row already fetched, since the bounded
   // scrollport (screens.css's .datatable-grid) is what actually handles
