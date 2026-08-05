@@ -571,10 +571,9 @@ a new address as of such-and-such date."
 `src/core/identity-resolver.js` fixes that with a small, deliberately
 narrow model: an `aliases` array on a `[devices.*]` entry, each alias a
 `{type, value, validFrom, validTo}` *time-scoped observation*, not a
-permanent ownership record. `type` is what kind of raw identifier it is
-(`"mac"` today; `"hostname"` is already indexed for mDNS/DNS, not yet
-wired into an adapter — see below), `value` is the raw address, `validTo`
-omitted means still current:
+permanent ownership record. `type` is what kind of raw identifier it is —
+`"mac"` (BLE) or `"hostname"` (mDNS/DNS) today — `value` is the raw
+address, `validTo` omitted means still current:
 
 ```toml
 [devices.garage-thermometer]
@@ -630,14 +629,31 @@ design with a separate canonical-id/display-name split, resolving to a
 name here already *is* resolving to the canonical device, so there's no
 second identity map to keep in sync.
 
+**mDNS and DNS aliasing (`mdns-adapter.js`/`dns-adapter.js`) use the same
+`type: "hostname"` alias, but only the forward half of the resolver.**
+BLE's advertisement scan naturally sees every currently-visible raw
+address in one response, so `ble-gatt-proxy-adapter.js` can reverse-resolve
+each one (`resolveCandidates`) to find out which belongs to a given
+record. mDNS/DNS resolution — local multicast, via a `meterkast-proxy`
+board, or plain unicast DNS, all three — is the opposite shape: it always
+needs one definite hostname to query *before* anything can come back, so
+both adapters' read loops pick it with `currentAliasValue(record,
+"hostname")` instead, the same forward direction `ble-gatt-proxy-adapter`'s
+own GATT-connect path already uses to choose which MAC to dial. Nothing
+currently live for that record is a real "don't guess" skip (logged, same
+as an `ambiguous` BLE result), not a fallback to a possibly-stale name.
+Each adapter's own `unclaimedMdnsCandidates`/`unclaimedDnsCandidates`
+discovery function *does* get the reverse-resolve treatment
+(`buildAliasIndex` + the shared `isClaimed` helper), since deciding "is
+this observed hostname already claimed by *some* configured device" is
+naturally the same shape as BLE's own already-claimed check.
+
 **Not built here**: live playlist hot-reload — the alias index (like the
-rest of the playlist) is built once at daemon startup
-(`bin/meterkastd.js`), so a playlist edit needs a restart to take effect,
-same as every other startup-time value in this project. mDNS/DNS aliasing
-is structurally identical (hostname instead of MAC, `type: "hostname"`
-already indexed) but not yet wired into `mdns-adapter.js`/`dns-adapter.js`
-— a real, low-effort follow-up once a hostname actually needs it. TOML
-schema validation is out of scope, same as everywhere else in this file.
+rest of the playlist) is built once per call inside each adapter's own
+read/discovery functions from whatever the playlist held at daemon
+startup, so a playlist edit still needs a restart to take effect, same as
+every other startup-time value in this project. TOML schema validation is
+out of scope, same as everywhere else in this file.
 
 ### WebBLE/WebUSB instead of a native binding
 

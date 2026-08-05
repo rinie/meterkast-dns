@@ -12,6 +12,7 @@
 import defaultDns from "node:dns/promises";
 import { networkInterfaces } from "node:os";
 import { log } from "../core/log.js";
+import { buildAliasIndex, isClaimed, currentAliasValue } from "../core/identity-resolver.js";
 
 // Same A-preferred, AAAA-fallback shape as the mdns adapter's
 // resolveHostname, for the same reason: a router-assigned hostname can be
@@ -162,13 +163,9 @@ export async function scanSubnet(cidr, { resolver = defaultDns, concurrency = 8 
 // a starting point, same as every other transport's unclaimed-candidate
 // function.
 export function unclaimedDnsCandidates(scanResults, configuredRecords) {
-  const claimedHostnames = new Set(
-    Object.values(configuredRecords)
-      .filter((record) => record.transport === "dns")
-      .map((record) => record.address),
-  );
+  const aliasIndex = buildAliasIndex(configuredRecords);
   return scanResults
-    .filter(({ hostname }) => !claimedHostnames.has(hostname))
+    .filter(({ hostname }) => !isClaimed(aliasIndex, "hostname", hostname))
     .map(({ ip, hostname }) => ({
       transport: "dns",
       address: hostname,
@@ -190,7 +187,18 @@ export default async function* dnsAdapter(records, { intervalMs = 60000, resolve
   while (true) {
     for (const [name, record] of targets) {
       try {
-        const resolved = await resolveDnsHostname(record.address, { resolver });
+        // Same forward-direction reasoning as mdns-adapter.js's own read
+        // loop: one definite hostname has to be picked before a DNS
+        // query can even be sent, so this only ever needs
+        // currentAliasValue, not a reverse-scan index. Falls back to
+        // record.address for the common no-`aliases` case; nothing live
+        // right now is a real "don't guess" skip, not a stale fallback.
+        const hostname = currentAliasValue(record, "hostname");
+        if (!hostname) {
+          log("warn", `${name}: no currently-valid hostname alias to resolve`);
+          continue;
+        }
+        const resolved = await resolveDnsHostname(hostname, { resolver });
         yield { ...record, name, meta: resolved };
       } catch (error) {
         log("warn", `DNS resolution failed for ${name}: ${error.message}`);

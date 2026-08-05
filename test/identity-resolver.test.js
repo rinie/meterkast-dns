@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAliasIndex, resolveCandidates, currentAliasValue } from "../src/core/identity-resolver.js";
+import { buildAliasIndex, resolveCandidates, currentAliasValue, isClaimed } from "../src/core/identity-resolver.js";
 
 test("resolveCandidates resolves an existing no-aliases entry via its plain address (backward compat)", () => {
   const index = buildAliasIndex({
@@ -121,4 +121,15 @@ test("buildAliasIndex ignores a record's aliases entirely if the array is empty,
   // single-address fallback -- an empty array is a real, if unusual,
   // "this device currently has no valid aliases" statement.
   assert.deepEqual(resolveCandidates(index, "mac", "AA:BB:CC:DD:EE:FF"), { status: "unknown" });
+});
+
+test("isClaimed is true for both a resolved and an ambiguous raw key, false for unknown", () => {
+  const index = buildAliasIndex({
+    "device-a": { transport: "bluetooth", aliases: [{ type: "mac", value: "AA:BB:CC:DD:EE:FF" }] },
+    "device-b": { transport: "bluetooth", aliases: [{ type: "mac", value: "AA:BB:CC:DD:EE:FF" }] },
+    "device-c": { transport: "bluetooth", aliases: [{ type: "mac", value: "11:22:33:44:55:66" }] },
+  });
+  assert.equal(isClaimed(index, "mac", "11:22:33:44:55:66"), true); // resolved
+  assert.equal(isClaimed(index, "mac", "AA:BB:CC:DD:EE:FF"), true); // ambiguous
+  assert.equal(isClaimed(index, "mac", "99:99:99:99:99:99"), false); // unknown
 });

@@ -296,6 +296,85 @@ test("unclaimedMdnsCandidates dedupes the same hostname seen by more than one pr
   assert.equal(candidates.length, 1);
 });
 
+test("mdnsAdapter resolves via a rotated hostname alias -- old hostname expired, new one current, queried against the proxy", async () => {
+  const fixture = await loadProxyMdnsFixture();
+  const server = await startFakeProxyServer({ "/scan/mdns": fixture });
+  const { port } = server.address();
+  const proxyUrl = `http://127.0.0.1:${port}`;
+
+  const records = {
+    "living-room-hub": {
+      transport: "mdns",
+      aliases: [
+        { type: "hostname", value: "old-hostname.local", validFrom: "2026-01-01", validTo: "2026-06-01" },
+        { type: "hostname", value: "homeassistant.local", validFrom: "2026-06-01" },
+      ],
+    },
+  };
+  const generator = mdnsAdapter(records, { intervalMs: 5, proxyUrl });
+
+  try {
+    const { value, done } = await generator.next();
+    assert.equal(done, false);
+    assert.equal(value.name, "living-room-hub");
+    assert.deepEqual(value.meta, { resolvedAddress: "192.168.1.50", family: "A" });
+  } finally {
+    await generator.return();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("mdnsAdapter skips a target with no currently-valid hostname alias without crashing the rest of the cycle", async () => {
+  const fixture = await loadProxyMdnsFixture();
+  const server = await startFakeProxyServer({ "/scan/mdns": fixture });
+  const { port } = server.address();
+  const proxyUrl = `http://127.0.0.1:${port}`;
+
+  const records = {
+    // Not live yet -- currentAliasValue returns undefined, so this target
+    // must be skipped (logged, not resolved against a stale/wrong name).
+    "future-device": {
+      transport: "mdns",
+      aliases: [{ type: "hostname", value: "future-device.local", validFrom: "2099-01-01" }],
+    },
+    "living-room-hub": { transport: "mdns", address: "homeassistant.local" },
+  };
+  const generator = mdnsAdapter(records, { intervalMs: 5, proxyUrl });
+
+  try {
+    // future-device is skipped entirely (no yield), so the first real
+    // yield in this cycle is living-room-hub -- proves the skip path
+    // doesn't throw and doesn't block the rest of the target list.
+    const { value, done } = await generator.next();
+    assert.equal(done, false);
+    assert.equal(value.name, "living-room-hub");
+  } finally {
+    await generator.return();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("unclaimedMdnsCandidates excludes a hostname claimed only via a rotated alias, not the record's original address", async () => {
+  const fixture = await loadProxyMdnsFixture();
+  const entries = fixture.map((entry) => ({ ...entry, sourceProxy: "http://proxy-a" }));
+  const configuredRecords = {
+    "living-room-hub": {
+      transport: "mdns",
+      aliases: [
+        { type: "hostname", value: "old-hostname.local", validFrom: "2026-01-01", validTo: "2026-06-01" },
+        { type: "hostname", value: "homeassistant.local", validFrom: "2026-06-01" },
+      ],
+    },
+  };
+
+  const candidates = unclaimedMdnsCandidates(entries, configuredRecords);
+
+  assert.deepEqual(
+    candidates.map((c) => c.address),
+    ["chromecast-abcd.local"],
+  );
+});
+
 test("mdnsAdapter uses resolveViaProxy for every target and never opens a local multicast socket when proxyUrl is set", async () => {
   const fixture = await loadProxyMdnsFixture();
   const server = await startFakeProxyServer({ "/scan/mdns": fixture });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import dgram from "node:dgram";
 import dnsPromises from "node:dns/promises";
 import dnsPacket from "dns-packet";
-import { resolveDnsHostname, hostAddressesInCidr, scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from "../src/adapters/dns-adapter.js";
+import dnsAdapter, { resolveDnsHostname, hostAddressesInCidr, scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from "../src/adapters/dns-adapter.js";
 
 // Real local unicast DNS, not a mock of the wire protocol -- a tiny UDP
 // server built on dns-packet (already installed transitively via
@@ -139,6 +139,80 @@ test("unclaimedDnsCandidates filters out hostnames already claimed as transport=
   assert.deepEqual(candidates, [
     { transport: "dns", address: "printer2.home", suggestedName: "printer2-home", meta: { ip: "192.168.1.77" } },
   ]);
+});
+
+test("unclaimedDnsCandidates excludes a hostname claimed only via a rotated alias, not the record's original address", () => {
+  const scanResults = [
+    { ip: "192.168.1.53", hostname: "raspi3-new.home" },
+    { ip: "192.168.1.77", hostname: "printer2.home" },
+  ];
+  const configuredRecords = {
+    raspi3: {
+      transport: "dns",
+      aliases: [
+        { type: "hostname", value: "raspi3-old.home", validFrom: "2026-01-01", validTo: "2026-06-01" },
+        { type: "hostname", value: "raspi3-new.home", validFrom: "2026-06-01" },
+      ],
+    },
+  };
+
+  const candidates = unclaimedDnsCandidates(scanResults, configuredRecords);
+
+  assert.deepEqual(
+    candidates.map((c) => c.address),
+    ["printer2.home"],
+  );
+});
+
+test("dnsAdapter resolves via a rotated hostname alias -- old hostname expired, new one current, queried for real", async () => {
+  await withFakeDnsServer(
+    (q) => (q?.type === "A" && q.name === "raspi3-new.home" ? [{ name: "raspi3-new.home", type: "A", ttl: 120, data: "192.168.1.53" }] : null),
+    async (resolver) => {
+      const records = {
+        raspi3: {
+          transport: "dns",
+          aliases: [
+            { type: "hostname", value: "raspi3-old.home", validFrom: "2026-01-01", validTo: "2026-06-01" },
+            { type: "hostname", value: "raspi3-new.home", validFrom: "2026-06-01" },
+          ],
+        },
+      };
+      const generator = dnsAdapter(records, { intervalMs: 5, resolver });
+      try {
+        const { value, done } = await generator.next();
+        assert.equal(done, false);
+        assert.equal(value.name, "raspi3");
+        assert.deepEqual(value.meta, { resolvedAddress: "192.168.1.53", family: "A" });
+      } finally {
+        await generator.return();
+      }
+    },
+  );
+});
+
+test("dnsAdapter skips a target with no currently-valid hostname alias without crashing the rest of the cycle", async () => {
+  await withFakeDnsServer(
+    (q) => (q?.type === "A" && q.name === "printer2.home" ? [{ name: "printer2.home", type: "A", ttl: 120, data: "192.168.1.77" }] : null),
+    async (resolver) => {
+      const records = {
+        // Not live yet -- currentAliasValue returns undefined, so this
+        // target must be skipped rather than queried against a stale name.
+        "future-device": {
+          transport: "dns",
+          aliases: [{ type: "hostname", value: "future-device.home", validFrom: "2099-01-01" }],
+        },
+        printer2: { transport: "dns", address: "printer2.home" },
+      };
+      const generator = dnsAdapter(records, { intervalMs: 5, resolver });
+      try {
+        const { value, done } = await generator.next();
+        assert.equal(done, false);
+        assert.equal(value.name, "printer2");
+      } finally {
+        await generator.return();
+      }
+    },
+  );
 });
 
 // Fixture shape captured from this project's own real dev machine's
