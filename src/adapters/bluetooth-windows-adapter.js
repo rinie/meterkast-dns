@@ -30,6 +30,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { isBleIgnored } from "./ble-ignore.js";
+import { buildAliasIndex, resolveCandidates } from "../core/identity-resolver.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -52,12 +53,16 @@ function normalizeToArray(parsed) {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
-function claimedBluetoothAddresses(configuredRecords) {
-  return new Set(
-    Object.values(configuredRecords)
-      .filter((record) => record.transport === "bluetooth")
-      .map((record) => record.address),
-  );
+// "Claimed" means the alias index resolves this raw MAC to *some*
+// configured record right now -- resolved or ambiguous both count (an
+// ambiguous raw key still genuinely belongs to configured devices, just
+// not unambiguously one of them; it's not a free, unclaimed device
+// either way). Sharing buildAliasIndex/resolveCandidates with the
+// ble-gatt adapter means a device whose MAC has rotated stays correctly
+// "claimed" here too, instead of reappearing as a fresh unclaimed
+// candidate the moment its address changes.
+function isClaimed(aliasIndex, address) {
+  return resolveCandidates(aliasIndex, "mac", address).status !== "unknown";
 }
 
 // Shared candidate shape both sources below produce -- same fields every
@@ -116,9 +121,9 @@ export function parsePairedBluetoothDevices(pnpDevices) {
 }
 
 export function unclaimedPairedBluetoothDevices(pnpDevices, configuredRecords, ignoreList = []) {
-  const claimed = claimedBluetoothAddresses(configuredRecords);
+  const aliasIndex = buildAliasIndex(configuredRecords);
   return parsePairedBluetoothDevices(pnpDevices)
-    .filter((device) => !claimed.has(device.address) && !isBleIgnored(device.address, ignoreList))
+    .filter((device) => !isClaimed(aliasIndex, device.address) && !isBleIgnored(device.address, ignoreList))
     .map(toCandidate);
 }
 
@@ -196,8 +201,8 @@ export function parseNearbyBluetoothDevices(rawDevices) {
 }
 
 export function unclaimedNearbyBluetoothDevices(rawDevices, configuredRecords, ignoreList = []) {
-  const claimed = claimedBluetoothAddresses(configuredRecords);
+  const aliasIndex = buildAliasIndex(configuredRecords);
   return parseNearbyBluetoothDevices(rawDevices)
-    .filter((device) => !claimed.has(device.address) && !isBleIgnored(device.address, ignoreList))
+    .filter((device) => !isClaimed(aliasIndex, device.address) && !isBleIgnored(device.address, ignoreList))
     .map(toCandidate);
 }

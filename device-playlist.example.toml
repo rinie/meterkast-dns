@@ -75,20 +75,6 @@ usb-widget.endpointNumber  = 1
 game-controller.transport = "hid"
 game-controller.address   = "0079:0011"
 
-# Nested devices+readings, flattened at load time into
-# kitchen-thermometer-temperature / kitchen-thermometer-battery -- see
-# README.md "Extending to BLE GATT characteristics". Any bare `key = value`
-# line has to come before this [devices.*] section, not after -- TOML has
-# no way to "return to root" once a [table] header appears; the next bare
-# assignment would nest under the last header instead, silently.
-[devices.kitchen-thermometer]
-transport = "bluetooth"
-address   = "AA:BB:CC:DD:EE:FF"
-
-[devices.kitchen-thermometer.readings]
-temperature = { service = "health-thermometer", characteristic = "temperature-measurement" }
-battery     = { service = "battery-service",     characteristic = "battery-level" }
-
 # transport: "ble-gatt" -- read via a real meterkast-proxy ESP32 board
 # (proxyUrl), not this machine's own local BLE. All device-specific
 # knowledge (which UUIDs, which decode math) lives in
@@ -113,21 +99,6 @@ stock-xiaomi-thermometer.transport = "ble-gatt"
 stock-xiaomi-thermometer.address   = "C4:7C:8D:11:22:33"
 stock-xiaomi-thermometer.deviceType = "sig-thermometer"
 stock-xiaomi-thermometer.proxyUrl   = "http://192.168.1.52"
-
-# "atc-pvvx": ATC1441/pvvx custom thermometer firmware's own native
-# advertisement format (service data UUID 0x181a) -- the richest of the
-# advertisement profiles for a device running this firmware: temperature,
-# humidity, battery percent, and battery voltage all arrive in one packet
-# every cycle. This same real device also broadcasts Xiaomi's native
-# MiBeacon format concurrently under 0xfe95 (deviceType "mibeacon") --
-# either works, atc-pvvx just needs no round-robin wait for a full
-# reading. proxyUrl points at a second board here to show multiple
-# proxies are just multiple entries pointing at different boards,
-# nothing special.
-garage-thermometer.transport = "ble-gatt"
-garage-thermometer.address   = "A4:C1:38:F2:8A:FA"
-garage-thermometer.deviceType = "atc-pvvx"
-garage-thermometer.proxyUrl   = "http://192.168.1.52"
 
 # "mibeacon": a second real device, this one currently in Xiaomi's native
 # Mi Home advertising mode rather than pvvx custom mode -- same custom
@@ -172,3 +143,69 @@ flower-care.proxyUrl   = "http://192.168.1.174"
 #   specifically to help decide whether a UUID is common/noisy enough to
 #   be worth a "uuid:" entry.
 bleIgnore = ["DE:AD:BE:EF:00:", "uuid:fef3"]
+
+# Everything above this line is a flat dotted-key entry -- has to stay
+# that way, and in this position: TOML has no way to "return to root"
+# once a [table] header appears below, so every later bare/dotted
+# assignment (including another one-off `bleIgnore = [...]` or a new
+# flat device) would silently nest *inside* the most recent table
+# instead of landing at the top level. Add new flat entries above this
+# comment, not after it. (This bit a real copy of this exact file before
+# it was caught -- five ble-gatt entries and bleIgnore itself had been
+# silently swallowed into kitchen-thermometer.readings.*, parsing
+# without error and just quietly not doing anything. flattenDeviceReadings
+# has no way to tell "misplaced" from "intentional" -- TOML's own syntax
+# doesn't distinguish them either.)
+
+# Nested devices+readings, flattened at load time into
+# kitchen-thermometer-temperature / kitchen-thermometer-battery -- see
+# README.md "Extending to BLE GATT characteristics".
+[devices.kitchen-thermometer]
+transport = "bluetooth"
+address   = "AA:BB:CC:DD:EE:FF"
+
+[devices.kitchen-thermometer.readings]
+temperature = { service = "health-thermometer", characteristic = "temperature-measurement" }
+battery     = { service = "battery-service",     characteristic = "battery-level" }
+
+# "atc-pvvx": ATC1441/pvvx custom thermometer firmware's own native
+# advertisement format (service data UUID 0x181a) -- the richest of the
+# advertisement profiles for a device running this firmware: temperature,
+# humidity, battery percent, and battery voltage all arrive in one packet
+# every cycle. This same real device also broadcasts Xiaomi's native
+# MiBeacon format concurrently under 0xfe95 (deviceType "mibeacon") --
+# either works, atc-pvvx just needs no round-robin wait for a full
+# reading.
+#
+# Written in the nested [devices.*] form (no `readings` sub-table --
+# flattenDeviceReadings emits it as one flat record under its own name,
+# same as a dotted-key entry would, see README.md "Extending to
+# time-scoped device aliases") purely to carry [[...aliases]], which
+# TOML's array-of-tables syntax has no flat dotted-key equivalent for.
+#
+# The scenario: this device was physically swapped for a replacement
+# unit (battery died, board got re-flashed, whatever the real reason) --
+# same Semantic name, same physical spot in the garage, but a brand new
+# real MAC as of 2026-06-01. Rather than silently going stale the moment
+# the old MAC stopped advertising, both addresses are declared as
+# time-scoped aliases of the one canonical name: the old one bounded by
+# `validTo` (no longer resolves after that date), the new one open-ended
+# (`validTo` omitted = still current). See README.md "Extending to
+# time-scoped device aliases" and src/core/identity-resolver.js for the
+# resolution rules (unknown/resolved/ambiguous).
+[devices.garage-thermometer]
+transport  = "ble-gatt"
+deviceType = "atc-pvvx"
+proxyUrl   = "http://192.168.1.52"
+
+[[devices.garage-thermometer.aliases]]
+type      = "mac"
+value     = "A4:C1:38:F2:8A:E1"
+validFrom = "2026-01-01"
+validTo   = "2026-06-01"
+
+[[devices.garage-thermometer.aliases]]
+type      = "mac"
+value     = "A4:C1:38:F2:8A:FA"
+validFrom = "2026-06-01"
+# validTo omitted = still current

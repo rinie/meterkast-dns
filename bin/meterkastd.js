@@ -13,6 +13,7 @@ import dnsAdapter, { scanSubnet, unclaimedDnsCandidates, detectLocalCidr } from 
 import { parseProxyHosts, discoverBleViaProxies, unclaimedProxyBleDevices } from "../src/adapters/proxy-adapter.js";
 import matterAdapter from "../src/adapters/matter-adapter.js";
 import bleGattProxyAdapter from "../src/adapters/ble-gatt-proxy-adapter.js";
+import { buildAliasIndex } from "../src/core/identity-resolver.js";
 import { listWindowsUsbDevices, unclaimedWindowsUsbDevices } from "../src/adapters/usb-windows-adapter.js";
 import {
   listWindowsPairedBluetoothDevices,
@@ -56,6 +57,15 @@ for (const [name, record] of Object.entries(flattenDeviceReadings(devices))) {
   upsertRecord(registry, name, record);
 }
 
+// Built once, from the full registry (every transport, not just
+// ble-gatt) -- a rotated MAC shared across transports (unlikely but real,
+// e.g. a device reconfigured from "bluetooth" to "ble-gatt") still
+// resolves as one shared identity either way. No hot-reload (see
+// identity-resolver.js / IMPLEMENTATION.md): a playlist edit needs a
+// daemon restart to be picked up, same as every other startup-time value
+// here.
+const aliasIndex = buildAliasIndex(recordsAsObject(registry));
+
 // A single daemon-level proxyUrl (mdnsAdapter's own option, not a
 // per-device choice -- see mdns-adapter.js) so already-claimed mdns
 // entries resolve through the proxy too, not just discovery below. Only
@@ -74,7 +84,7 @@ const pollingAdapters = [
   ["mdns", "mDNS", mdnsAdapter, proxyUrls.length > 0 ? { proxyUrl: proxyUrls[0] } : {}],
   ["dns", "DNS", dnsAdapter, {}],
   ["matter", "Matter", matterAdapter, {}],
-  ["ble-gatt", "BLE GATT", bleGattProxyAdapter, {}],
+  ["ble-gatt", "BLE GATT", bleGattProxyAdapter, { aliasIndex }],
 ];
 for (const [transport, label, adapterFn, options] of pollingAdapters) {
   runPollingAdapter(registry, transport, adapterFn, options).catch((error) => {

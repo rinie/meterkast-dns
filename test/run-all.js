@@ -28,3 +28,4 @@ import "./decode-mibeacon.test.js";
 import "./decode-atc-pvvx.test.js";
 import "./ble-gatt-proxy-adapter.test.js";
 import "./ble-ignore.test.js";
+import "./identity-resolver.test.js";

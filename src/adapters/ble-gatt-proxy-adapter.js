@@ -8,11 +8,33 @@
 import { fetchProxyJson } from "./proxy-adapter.js";
 import { BLE_GATT_PROFILES } from "./ble-gatt-profiles.js";
 import { normalizeUuid } from "./ble-ignore.js";
+import { buildAliasIndex, resolveCandidates, currentAliasValue } from "../core/identity-resolver.js";
 import { log } from "../core/log.js";
 
-async function readAdvertisementProfile(proxyUrl, address, profile) {
+// Reverse-resolves each device the proxy currently reports against the
+// alias index, looking for the one that currently belongs to `name` --
+// rather than an exact `record.address` string match, which would
+// silently stop working the moment a device's own address rotates (a
+// privacy-mode BLE MAC, say). A genuinely ambiguous raw key (two live
+// records both claiming it right now) is logged and treated as "not
+// found this cycle," never guessed at -- same discipline
+// resolveCandidates itself already documents.
+function findResolvedDevice(devices, name, aliasIndex) {
+  const now = new Date();
+  for (const device of devices) {
+    const result = resolveCandidates(aliasIndex, "mac", device.address, now);
+    if (result.status === "resolved" && result.name === name) return device;
+    if (result.status === "ambiguous" && result.candidates.some((c) => c.name === name)) {
+      const others = result.candidates.map((c) => c.name).filter((n) => n !== name);
+      log("warn", `${name}: ${device.address} is currently ambiguous (also claimed by ${others.join(", ")}) -- skipping this cycle`);
+    }
+  }
+  return undefined;
+}
+
+async function readAdvertisementProfile(proxyUrl, name, profile, aliasIndex) {
   const devices = await fetchProxyJson(proxyUrl, "/scan/ble");
-  const device = devices.find((d) => d.address.toLowerCase() === address.toLowerCase());
+  const device = findResolvedDevice(devices, name, aliasIndex);
   if (!device?.serviceData) return undefined;
 
   const entry = Object.entries(device.serviceData).find(([uuid]) => normalizeUuid(uuid) === normalizeUuid(profile.serviceDataUuid));
@@ -21,7 +43,19 @@ async function readAdvertisementProfile(proxyUrl, address, profile) {
   return profile.decode(Buffer.from(entry[1], "hex"));
 }
 
-async function readGattProfile(proxyUrl, address, profile) {
+// A GATT connect has to pick one definite address to dial *before*
+// anything comes back to reverse-resolve against, unlike the
+// advertisement path above which naturally sees many addresses in one
+// scan response -- currentAliasValue answers "which of this record's own
+// aliases is live right now" directly, no index needed for that
+// direction.
+async function readGattProfile(proxyUrl, name, record, profile) {
+  const address = currentAliasValue(record, "mac");
+  if (!address) {
+    log("warn", `${name}: no currently-valid mac alias to connect to`);
+    return undefined;
+  }
+
   const result = await fetchProxyJson(proxyUrl, "/gatt/session", {
     address,
     serviceUuid: profile.serviceUuid,
@@ -45,7 +79,14 @@ async function readGattProfile(proxyUrl, address, profile) {
 // stopped mid-cycle from the outside (.return() only takes effect at a
 // yield point, and a record that never yields -- an unknown deviceType,
 // a device not currently visible -- never reaches one).
-export async function readBleGattRecord(name, record) {
+//
+// aliasIndex defaults to an index built from just this one record --
+// correct and sufficient for the common case (no `aliases` array, one
+// static address), same as before this existed. A caller juggling
+// several records (the generator below, or a test exercising
+// rotation/ambiguity across more than one) passes a real, shared index
+// built from all of them instead.
+export async function readBleGattRecord(name, record, aliasIndex = buildAliasIndex({ [name]: record })) {
   const profile = BLE_GATT_PROFILES[record.deviceType];
   if (!profile) {
     log("warn", `${name}: unknown ble-gatt deviceType "${record.deviceType}"`);
@@ -54,8 +95,8 @@ export async function readBleGattRecord(name, record) {
 
   const meta =
     profile.kind === "advertisement"
-      ? await readAdvertisementProfile(record.proxyUrl, record.address, profile)
-      : await readGattProfile(record.proxyUrl, record.address, profile);
+      ? await readAdvertisementProfile(record.proxyUrl, name, profile, aliasIndex)
+      : await readGattProfile(record.proxyUrl, name, record, profile);
 
   if (meta === undefined) {
     log("warn", `${name}: no reading this cycle (device not currently visible, or service/characteristic missing)`);
@@ -63,14 +104,15 @@ export async function readBleGattRecord(name, record) {
   return meta;
 }
 
-export default async function* bleGattProxyAdapter(records, { intervalMs = 60000 } = {}) {
+export default async function* bleGattProxyAdapter(records, { intervalMs = 60000, aliasIndex } = {}) {
   const targets = Object.entries(records).filter(([, record]) => record.transport === "ble-gatt");
   if (targets.length === 0) return;
 
+  const index = aliasIndex ?? buildAliasIndex(records);
   while (true) {
     for (const [name, record] of targets) {
       try {
-        const meta = await readBleGattRecord(name, record);
+        const meta = await readBleGattRecord(name, record, index);
         if (meta !== undefined) yield { ...record, name, meta };
       } catch (error) {
         log("warn", `ble-gatt read failed for ${name}: ${error.message}`);
