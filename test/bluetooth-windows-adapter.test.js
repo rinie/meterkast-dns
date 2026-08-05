@@ -68,6 +68,26 @@ test("unclaimedPairedBluetoothDevices excludes an already-claimed address, sugge
   ]);
 });
 
+test("unclaimedPairedBluetoothDevices excludes an address claimed only via a rotated alias, not the record's original address", async () => {
+  const pnpDevices = await loadPairedFixture();
+  const configuredRecords = {
+    "party-speaker": {
+      transport: "bluetooth",
+      aliases: [
+        { type: "mac", value: "AA:AA:AA:AA:AA:AA", validFrom: "2026-01-01", validTo: "2026-01-02" },
+        { type: "mac", value: "54:15:89:9A:7D:66", validFrom: "2026-01-02" },
+      ],
+    },
+  };
+
+  const candidates = unclaimedPairedBluetoothDevices(pnpDevices, configuredRecords);
+
+  assert.deepEqual(
+    candidates.map((c) => c.address),
+    ["99:42:BF:73:D3:17"],
+  );
+});
+
 test("unclaimedPairedBluetoothDevices excludes a device matching a bleIgnore prefix", async () => {
   const pnpDevices = await loadPairedFixture();
 

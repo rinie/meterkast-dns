@@ -558,6 +558,87 @@ relay above, additive whenever it's warranted. See IMPLEMENTATION.md for
 the real build/flash/live verification of both the firmware and this
 adapter.
 
+### Extending to time-scoped device aliases
+
+A playlist entry's `address` has always been a single, static value — real
+enough for a device that never changes, but not for one that does. A BLE
+MAC rotates under an OS privacy policy; a board gets physically swapped
+for a replacement unit; a device gets reflashed and comes back with a
+different default. Before this, any of those silently stopped the entry
+resolving, with no way to say "this is still the same device, it just has
+a new address as of such-and-such date."
+
+`src/core/identity-resolver.js` fixes that with a small, deliberately
+narrow model: an `aliases` array on a `[devices.*]` entry, each alias a
+`{type, value, validFrom, validTo}` *time-scoped observation*, not a
+permanent ownership record. `type` is what kind of raw identifier it is
+(`"mac"` today; `"hostname"` is already indexed for mDNS/DNS, not yet
+wired into an adapter — see below), `value` is the raw address, `validTo`
+omitted means still current:
+
+```toml
+[devices.garage-thermometer]
+transport  = "ble-gatt"
+deviceType = "atc-pvvx"
+proxyUrl   = "http://192.168.1.52"
+
+[[devices.garage-thermometer.aliases]]
+type      = "mac"
+value     = "A4:C1:38:F2:8A:E1"
+validFrom = "2026-01-01"
+validTo   = "2026-06-01"
+
+[[devices.garage-thermometer.aliases]]
+type      = "mac"
+value     = "A4:C1:38:F2:8A:FA"
+validFrom = "2026-06-01"
+# validTo omitted = still current
+```
+
+TOML's array-of-tables (`[[...]]`) has no flat dotted-key equivalent, so
+an entry that wants `aliases` has to move to the nested `[devices.*]` form
+already used for WebBLE multi-reading devices above — with no `readings`
+sub-table this time, `flattenDeviceReadings` (`src/core/playlist.js`)
+emits it as one flat record under its own name, same as a dotted-key entry
+would have.
+
+**Every existing entry keeps resolving with zero playlist changes.** A
+record with no `aliases` array is treated as one implicit, always-valid
+alias — `type` inferred from `transport` (`bluetooth`/`ble-gatt` → `mac`,
+`mdns`/`dns` → `hostname`), `value` its own plain `address` — so nothing
+that's never had its address rotate needs to change at all.
+
+**Resolution never silently guesses.** `resolveCandidates(index, type,
+rawValue, observedAt)` returns one of three real states:
+`{status: 'unknown'}` (no live alias matches this raw value right now),
+`{status: 'resolved', name}` (exactly one), or `{status: 'ambiguous',
+candidates}` (more than one live device genuinely claims the same raw
+value at the same instant — a real MAC collision, not something to guess
+between). `ble-gatt-proxy-adapter.js` reverse-resolves each device the
+proxy currently reports this way instead of an exact `record.address`
+string match, so a rotated MAC keeps resolving using whichever alias is
+valid *now*; `bluetooth-windows-adapter.js`'s paired/nearby discovery
+shares the exact same resolver to decide whether a scanned address is
+already claimed. An `ambiguous` result logs a real warning
+(`src/core/log.js`, visible on `/screens/logs`) and skips resolving that
+device for the cycle — the same "no silent overwriting" discipline every
+other adapter in this project already holds to.
+
+This project's playlist name already *is* both the lookup key and the
+displayed label (see "The device-playlist file format" above) — unlike a
+design with a separate canonical-id/display-name split, resolving to a
+name here already *is* resolving to the canonical device, so there's no
+second identity map to keep in sync.
+
+**Not built here**: live playlist hot-reload — the alias index (like the
+rest of the playlist) is built once at daemon startup
+(`bin/meterkastd.js`), so a playlist edit needs a restart to take effect,
+same as every other startup-time value in this project. mDNS/DNS aliasing
+is structurally identical (hostname instead of MAC, `type: "hostname"`
+already indexed) but not yet wired into `mdns-adapter.js`/`dns-adapter.js`
+— a real, low-effort follow-up once a hostname actually needs it. TOML
+schema validation is out of scope, same as everywhere else in this file.
+
 ### WebBLE/WebUSB instead of a native binding
 
 An earlier version of this design used `@abandonware/noble`, a native

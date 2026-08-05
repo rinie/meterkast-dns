@@ -96,10 +96,22 @@ export async function watchPlaylist(path, onChange, { signal } = {}) {
 // every reading still ends up as an independently queryable entry in the
 // same flat registry namespace as everything else, with no special-casing
 // needed anywhere downstream (the core, the HTTP API).
+//
+// A `[devices.*]` entry with no `readings` at all (single-reading device,
+// e.g. one that only needs the nested shape to carry a `[[...aliases]]`
+// array-of-tables -- TOML has no way to express that as a flat dotted-key
+// line) emits one flat record under its own bare name instead, carrying
+// every other field (including `aliases`) straight through -- exactly
+// what a flat dotted-key entry already produces, just reached via the
+// nested syntax for the one thing that requires it.
 export function flattenDeviceReadings(devicesSection = {}) {
   const flat = {};
   for (const [deviceName, device] of Object.entries(devicesSection)) {
-    const { readings = {}, ...deviceFields } = device;
+    const { readings, ...deviceFields } = device;
+    if (!readings) {
+      flat[deviceName] = deviceFields;
+      continue;
+    }
     for (const [readingName, reading] of Object.entries(readings)) {
       flat[`${deviceName}-${readingName}`] = { ...deviceFields, ...reading };
     }

@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile, readdir, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { writePlaylist, readPlaylist, addPlaylistEntry, nextAvailableName } from "../src/core/playlist.js";
+import { writePlaylist, readPlaylist, addPlaylistEntry, nextAvailableName, flattenDeviceReadings } from "../src/core/playlist.js";
 import { formatBackupDate } from "../src/core/playlist-backup.js";
 
 test("write then read round-trips a playlist", async () => {
@@ -156,4 +156,67 @@ test("addPlaylistEntry rejects a name collision with error.code EEXISTS and a su
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("flattenDeviceReadings turns a devices+readings section into one flat record per reading, address shared", () => {
+  const devices = {
+    "kitchen-thermometer": {
+      transport: "bluetooth",
+      address: "AA:BB:CC:DD:EE:FF",
+      readings: {
+        temperature: { service: "health-thermometer", characteristic: "temperature-measurement" },
+        battery: { service: "battery-service", characteristic: "battery-level" },
+      },
+    },
+  };
+  assert.deepEqual(flattenDeviceReadings(devices), {
+    "kitchen-thermometer-temperature": {
+      transport: "bluetooth",
+      address: "AA:BB:CC:DD:EE:FF",
+      service: "health-thermometer",
+      characteristic: "temperature-measurement",
+    },
+    "kitchen-thermometer-battery": {
+      transport: "bluetooth",
+      address: "AA:BB:CC:DD:EE:FF",
+      service: "battery-service",
+      characteristic: "battery-level",
+    },
+  });
+});
+
+test("flattenDeviceReadings emits one flat record under the device's own name when there's no readings section", () => {
+  // The shape a device needs purely to carry a [[...aliases]] array-of-tables
+  // (TOML has no flat-dotted-key way to express that) -- not a multi-reading
+  // WebBLE device, so no `-${readingName}` suffix, and every other field
+  // (including `aliases`) passes through untouched.
+  const devices = {
+    "garage-thermometer": {
+      transport: "ble-gatt",
+      deviceType: "atc-pvvx",
+      proxyUrl: "http://192.168.1.52",
+      aliases: [{ type: "mac", value: "A4:C1:38:F2:8A:FA", validFrom: "2026-06-01" }],
+    },
+  };
+  assert.deepEqual(flattenDeviceReadings(devices), {
+    "garage-thermometer": {
+      transport: "ble-gatt",
+      deviceType: "atc-pvvx",
+      proxyUrl: "http://192.168.1.52",
+      aliases: [{ type: "mac", value: "A4:C1:38:F2:8A:FA", validFrom: "2026-06-01" }],
+    },
+  });
+});
+
+test("flattenDeviceReadings handles a mix of readings-based and no-readings devices in one section", () => {
+  const devices = {
+    "kitchen-thermometer": {
+      transport: "bluetooth",
+      address: "AA:BB:CC:DD:EE:FF",
+      readings: { temperature: { service: "health-thermometer", characteristic: "temperature-measurement" } },
+    },
+    "garage-thermometer": { transport: "ble-gatt", deviceType: "atc-pvvx", proxyUrl: "http://192.168.1.52" },
+  };
+  const flat = flattenDeviceReadings(devices);
+  assert.deepEqual(Object.keys(flat).sort(), ["garage-thermometer", "kitchen-thermometer-temperature"]);
 });

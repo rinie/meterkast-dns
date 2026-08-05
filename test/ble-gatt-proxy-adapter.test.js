@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import bleGattProxyAdapter, { readBleGattRecord } from "../src/adapters/ble-gatt-proxy-adapter.js";
+import { buildAliasIndex } from "../src/core/identity-resolver.js";
 
 // A real local HTTP server standing in for the ESP32 proxy, same
 // pattern proxy-adapter.test.js already uses -- routes hand-configured
@@ -105,6 +106,48 @@ test("readBleGattRecord returns undefined when a GATT session fails", async () =
   try {
     const record = { transport: "ble-gatt", address: "00:00:00:00:00:00", deviceType: "sig-thermometer", proxyUrl: `http://127.0.0.1:${port}` };
     assert.equal(await readBleGattRecord("unreachable-thermometer", record), undefined);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("readBleGattRecord resolves via a rotated alias -- old MAC expired, new MAC live, matched against the scan's current address", async () => {
+  const server = await startFakeProxyServer({
+    "GET /scan/ble": () => ({
+      body: [{ address: "A4:C1:38:F2:8A:FB", rssi: -60, ageMs: 1000, serviceData: { "0xfcd2": "4002ca09" } }],
+    }),
+  });
+  const { port } = server.address();
+  try {
+    const record = {
+      transport: "ble-gatt",
+      deviceType: "bthome-v2",
+      proxyUrl: `http://127.0.0.1:${port}`,
+      aliases: [
+        { type: "mac", value: "A4:C1:38:F2:8A:FA", validFrom: "2026-06-01", validTo: "2026-08-01" },
+        { type: "mac", value: "A4:C1:38:F2:8A:FB", validFrom: "2026-08-01" },
+      ],
+    };
+    const index = buildAliasIndex({ "garage-thermometer": record });
+    assert.deepEqual(await readBleGattRecord("garage-thermometer", record, index), { temperature: 25.06 });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("readBleGattRecord skips (returns undefined) when the scanned address is genuinely ambiguous between two records", async () => {
+  const server = await startFakeProxyServer({
+    "GET /scan/ble": () => ({
+      body: [{ address: "AA:BB:CC:DD:EE:FF", rssi: -60, ageMs: 1000, serviceData: { "0xfcd2": "4002ca09" } }],
+    }),
+  });
+  const { port } = server.address();
+  try {
+    const proxyUrl = `http://127.0.0.1:${port}`;
+    const recordA = { transport: "ble-gatt", deviceType: "bthome-v2", proxyUrl, aliases: [{ type: "mac", value: "AA:BB:CC:DD:EE:FF" }] };
+    const recordB = { transport: "ble-gatt", deviceType: "bthome-v2", proxyUrl, aliases: [{ type: "mac", value: "AA:BB:CC:DD:EE:FF" }] };
+    const index = buildAliasIndex({ "device-a": recordA, "device-b": recordB });
+    assert.equal(await readBleGattRecord("device-a", recordA, index), undefined);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

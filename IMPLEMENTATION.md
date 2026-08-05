@@ -1680,6 +1680,53 @@ previously-broken entry, `WDMyCloud`) with real resolved IPs. `node
 existing test's expectations updated to match the corrected fixture, one
 new regression test added documenting the exact incident).
 
+**Time-scoped device aliases (`src/core/identity-resolver.js`), ported
+from a design worked out in a separate conversation and adapted to this
+project's own conventions -- see README.md "Extending to time-scoped
+device aliases" for the full model.** Wired into both BLE adapters
+(`ble-gatt-proxy-adapter.js` reverse-resolves each scanned device against
+the alias index instead of an exact `record.address` match;
+`bluetooth-windows-adapter.js`'s paired/nearby discovery shares the same
+resolver to decide what's already claimed) and into `bin/meterkastd.js`
+(alias index built once at startup from the full registry). Converting
+the real, already-configured `device-playlist.example.toml` to exercise
+the new nested-`aliases` form surfaced a genuine, unrelated, pre-existing
+bug in that same file: five `ble-gatt`/`bluetooth` entries and the
+top-level `bleIgnore` array were all written as bare dotted-key lines
+*after* `[devices.kitchen-thermometer.readings]`'s table header -- TOML
+has no way to "return to root" once a table header appears, so every one
+of them was silently nesting under `devices.kitchen-thermometer.readings.*`
+instead of landing at the top level. Confirmed directly: parsing the
+file before the fix showed those six keys nested under
+`devices['kitchen-thermometer'].readings`, not at the playlist's root --
+meaning a fresh copy of this exact template, if used as-is, would never
+have configured those five BLE devices or picked up `bleIgnore` at all,
+despite parsing without error. Fixed by reordering every flat entry to
+appear before the first `[table]` header, with a comment marking the
+boundary. Real, live verification against this machine's own
+`device-playlist.toml` and hardware (not the example file, which is
+gitignored-copy-only): restarted the daemon with the new code --
+`GET /devices/koelkast-thermometer` (an existing, unmodified
+`ble-gatt`/`mibeacon` entry with no `aliases` array) still returns the
+identical shape as before the change, confirming the no-`aliases`
+implicit-alias backward-compat path holds for real, not just in
+`identity-resolver.test.js`. Both configured `meterkast-proxy` ESP32
+boards (192.168.1.52, 192.168.1.174) happened to be unreachable on the
+network at verification time (`ping` timeouts, not connection-refused --
+an environmental gap, not a regression); the daemon logged a clear
+"fetch failed" per affected entry and kept running, the same per-adapter
+isolation every other adapter already has, so the ble-gatt read path
+itself couldn't be exercised against a live board this session. The
+Windows-native Bluetooth path needed no such board and *was* exercised
+for real: `POST /discover/bluetooth-paired` against this machine's own
+real `Get-PnpDevice` output correctly excluded `jbl-partybox-encore`
+(`54:15:89:9A:7D:66`, a real configured playlist entry) from the
+candidate list while still surfacing the genuinely-unclaimed "RCS
+Soundboom" -- proof the new `buildAliasIndex`/`resolveCandidates`-based
+`isClaimed` check (replacing the old `Set`-based exact-match) resolves
+correctly against real hardware and a real playlist, not a fixture.
+`node --test test/run-all.js`: 235 pass, 1 pre-existing skip, 0 failing.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via
