@@ -209,3 +209,29 @@ type      = "mac"
 value     = "A4:C1:38:F2:8A:FA"
 validFrom = "2026-06-01"
 # validTo omitted = still current
+
+# A NAS box whose hostname changed after being renamed in its own admin
+# UI (wd-mycloud -> wd-mycloud-nas) -- the same "raw identifier isn't a
+# permanent fact" problem BLE's rotating MACs have, just for an mDNS
+# hostname instead. Same nested-form reasoning as garage-thermometer
+# above (no `readings`, purely to carry `[[...aliases]]`). Unlike
+# ble-gatt-proxy-adapter.js's advertisement-scan path, mDNS resolution
+# (local or via proxy) always needs one definite hostname to query
+# *before* anything comes back -- mdns-adapter.js picks it with
+# `currentAliasValue`, a forward resolve, never a reverse scan-and-match
+# against a list of everything currently visible. See README.md
+# "Extending to time-scoped device aliases".
+[devices.wd-mycloud]
+transport = "mdns"
+
+[[devices.wd-mycloud.aliases]]
+type      = "hostname"
+value     = "wd-mycloud.local"
+validFrom = "2026-01-01"
+validTo   = "2026-07-01"
+
+[[devices.wd-mycloud.aliases]]
+type      = "hostname"
+value     = "wd-mycloud-nas.local"
+validFrom = "2026-07-01"
+# validTo omitted = still current

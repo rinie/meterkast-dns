@@ -1727,6 +1727,59 @@ Soundboom" -- proof the new `buildAliasIndex`/`resolveCandidates`-based
 correctly against real hardware and a real playlist, not a fixture.
 `node --test test/run-all.js`: 235 pass, 1 pre-existing skip, 0 failing.
 
+**mDNS/DNS device aliases, the follow-up the previous entry's README
+section explicitly flagged as not yet wired.** Extended the same
+`type: "hostname"` alias (already indexed in `identity-resolver.js` from
+the start) into `mdns-adapter.js` and `dns-adapter.js`. The real
+discovery here: unlike `ble-gatt-proxy-adapter.js`'s advertisement scan,
+which naturally sees every currently-visible raw address in one response
+and can reverse-resolve each one, mDNS/DNS resolution -- local multicast,
+via a proxy board, or plain unicast DNS, all three -- always needs one
+definite hostname to query *before* anything can come back. So the read
+path in both adapters only ever needed the forward half of the resolver,
+`currentAliasValue`, the same direction `ble-gatt-proxy-adapter.js`'s own
+GATT-connect path already uses -- no `buildAliasIndex`/`resolveCandidates`
+call anywhere in either adapter's polling loop, a genuinely simpler wiring
+than BLE's. The two discovery functions
+(`unclaimedMdnsCandidates`/`unclaimedDnsCandidates`) *did* need the
+reverse-resolve treatment, since "is this observed hostname already
+claimed" is the same shape as BLE's own claim check --
+`bluetooth-windows-adapter.js`'s local `isClaimed` helper was promoted to
+a shared export on `identity-resolver.js` itself rather than
+reimplementing the identical `resolveCandidates(...).status !== 'unknown'`
+check a third and fourth time. `unclaimedMdnsCandidates` needed one extra
+piece of care carried over from the earlier real incident in this same
+function: the alias index is built from configured records in their
+canonical, always-`.local`-suffixed form, so the one boundary where a
+*bare* hostname enters (the proxy's own `/scan/mdns` reports hostnames
+without the suffix) gets `.local` appended before the lookup, rather than
+stripping the suffix from the configured side the way the old code did --
+keeps exactly one adapted value instead of every comparison needing to
+remember the strip.
+
+Live-verified against this machine's own real playlist and network, same
+`device-playlist.toml` as the previous entry: restarted the daemon --
+`GET /devices/raspi3` (an existing, unmodified `dns`-transport entry, no
+`aliases`) resolved to `192.168.1.53` exactly as before, real proof the
+no-`aliases` implicit-alias backward-compat path holds for the DNS
+adapter too. `POST /discover/dns` against this machine's real local
+subnet returned every genuinely-unclaimed hostname the PTR sweep found
+(`WDMyCloud.home`, `homeassistant.home`, and 30-plus more real devices on
+this household's own network) while correctly excluding `raspi3.home`,
+the one already-configured entry -- proof the new
+`buildAliasIndex`/`isClaimed`-based check in `unclaimedDnsCandidates`
+resolves correctly against real data, not a fixture. (`WDMyCloud.home`
+showing up in that real scan is also what grounded the NAS-rename
+scenario used for `device-playlist.example.toml`'s new `wd-mycloud`
+alias example -- a real device on this exact network, not an invented
+name.) The mDNS read path itself (`GET /devices/homeassistant`, an
+existing `mdns`-transport entry resolved via proxy) logged the same
+"fetch failed" this session's ble-gatt entries did -- both configured
+`meterkast-proxy` boards were still unreachable on the network at
+verification time, the identical environmental gap noted in the previous
+entry, not a regression from this change. `node --test test/run-all.js`:
+242 pass, 1 pre-existing skip, 0 failing.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via

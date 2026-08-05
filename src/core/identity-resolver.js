@@ -114,3 +114,14 @@ export function resolveCandidates(index, type, rawValue, observedAt = new Date()
 
   return { status: "ambiguous", candidates: live.map((e) => ({ name: e.name, confidence: e.confidence })) };
 }
+
+// A discovery-time convenience for the common "is this raw value already
+// claimed by some configured device" check -- resolved and ambiguous both
+// count as claimed (an ambiguous raw key still genuinely belongs to
+// configured devices, just not unambiguously one of them; it's not a free,
+// unclaimed value either way). Shared across every adapter's own
+// unclaimed-candidate function rather than each reimplementing the same
+// "status !== 'unknown'" check.
+export function isClaimed(index, type, rawValue, observedAt = new Date()) {
+  return resolveCandidates(index, type, rawValue, observedAt).status !== "unknown";
+}

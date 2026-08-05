@@ -8,6 +8,7 @@
 import createMdns from "multicast-dns";
 import { log } from "../core/log.js";
 import { fetchProxyJson } from "./proxy-adapter.js";
+import { buildAliasIndex, isClaimed, currentAliasValue } from "../core/identity-resolver.js";
 
 function slugify(text) {
   return text
@@ -190,25 +191,21 @@ export async function discoverMdnsViaProxies(proxyUrls) {
 }
 
 export function unclaimedMdnsCandidates(proxyEntries, configuredRecords) {
-  // Same real mismatch resolveViaProxy above had to fix: a configured
-  // playlist address keeps the ".local" suffix (README's own convention),
-  // but the proxy's own /scan/mdns reports a plain hostname's own A
-  // record bare (confirmed live: "meterkast-proxy", not
-  // "meterkast-proxy.local"). Comparing them as-is meant an
-  // already-claimed device could never be recognized as claimed here --
-  // it would keep showing up as a fresh "unclaimed" candidate forever.
-  // Normalized to the bare form (already what entry.hostname naturally
-  // is) before comparing, rather than requiring every entry.hostname use
-  // to remember to strip it individually.
-  const claimed = new Set(
-    Object.values(configuredRecords)
-      .filter((record) => record.transport === "mdns")
-      .map((record) => record.address.replace(/\.local\.?$/i, "")),
-  );
+  const aliasIndex = buildAliasIndex(configuredRecords);
   const seen = new Set();
   const candidates = [];
   for (const entry of proxyEntries) {
-    if (claimed.has(entry.hostname) || seen.has(entry.hostname)) continue;
+    // Same real mismatch resolveViaProxy above had to fix: a configured
+    // playlist address (or an explicit "hostname"-type alias value) keeps
+    // the ".local" suffix (README's own convention), but the proxy's own
+    // /scan/mdns reports a plain hostname's own A record bare (confirmed
+    // live: "meterkast-proxy", not "meterkast-proxy.local"). Appending
+    // ".local" to the bare value the proxy reports -- rather than
+    // stripping it from every configured address -- keeps the alias
+    // index itself in the one canonical, ".local"-suffixed form the rest
+    // of this project already uses, with the bare-vs-suffixed adaptation
+    // needed only at this one boundary where bare data enters.
+    if (isClaimed(aliasIndex, "hostname", `${entry.hostname}.local`) || seen.has(entry.hostname)) continue;
     seen.add(entry.hostname);
     candidates.push({
       transport: "mdns",
@@ -251,11 +248,27 @@ export default async function* mdnsAdapter(records, { intervalMs = 60000, timeou
     while (true) {
       for (const [name, record] of targets) {
         try {
+          // Which of this record's own hostname/service-name aliases is
+          // live right now -- the forward direction (see
+          // identity-resolver.js): resolution here always needs one
+          // definite name to query *before* anything comes back, unlike
+          // ble-gatt-proxy-adapter's advertisement-scan path, which sees
+          // every currently-visible raw value at once and can
+          // reverse-resolve. Falls back to record.address for the common
+          // no-`aliases` case (implicit alias, unchanged behavior); an
+          // explicit `aliases` array with nothing currently live is a
+          // real "don't guess" case, not a fallback to a possibly-stale
+          // name.
+          const address = currentAliasValue(record, "hostname");
+          if (!address) {
+            log("warn", `${name}: no currently-valid hostname alias to resolve`);
+            continue;
+          }
           const resolved = proxyUrl
-            ? await resolveViaProxy(proxyUrl, record.address)
-            : isServiceQuery(record.address)
-              ? await resolveService(mdns, record.address, { timeoutMs })
-              : await resolveHostname(mdns, record.address, { timeoutMs });
+            ? await resolveViaProxy(proxyUrl, address)
+            : isServiceQuery(address)
+              ? await resolveService(mdns, address, { timeoutMs })
+              : await resolveHostname(mdns, address, { timeoutMs });
           yield { ...record, name, meta: resolved };
         } catch (error) {
           log("warn", `mDNS resolution failed for ${name}: ${error.message}`);
