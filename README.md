@@ -648,6 +648,25 @@ discovery function *does* get the reverse-resolve treatment
 this observed hostname already claimed by *some* configured device" is
 naturally the same shape as BLE's own already-claimed check.
 
+**A real incident, worth stating plainly: `aliases` is for one canonical
+name whose raw address changes over time, not a way to give one physical
+device two simultaneously-live playlist entries.** If a device gets
+migrated to a new transport — claimed years ago as a plain `transport =
+"bluetooth"` entry via Windows discovery, later given a real `ble-gatt`
+entry once a `meterkast-proxy` board could read it — delete the old
+entry. Two names both claiming the same live raw address is a genuine
+`ambiguous` result, not a harmless duplicate, and every adapter's read
+path correctly refuses to guess which one it is rather than resolving
+either. This bit a real playlist on this exact project: three old,
+unused `bluetooth`-transport leftovers (never read by any polling
+adapter — nothing wires up `transport = "bluetooth"` polling at all,
+only discovery treats it specially) each shared a MAC with a real,
+actively-polled `ble-gatt` entry. The moment the alias resolver started
+cross-checking every transport against one shared index, the real
+entries silently stopped getting new readings until the stale ones were
+deleted — see `device-playlist.example.toml`'s own comment on this for
+the fuller account.
+
 **Not built here**: live playlist hot-reload — the alias index (like the
 rest of the playlist) is built once per call inside each adapter's own
 read/discovery functions from whatever the playlist held at daemon
