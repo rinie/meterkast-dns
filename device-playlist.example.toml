@@ -235,3 +235,24 @@ type      = "hostname"
 value     = "wd-mycloud-nas.local"
 validFrom = "2026-07-01"
 # validTo omitted = still current
+
+# A real incident, worth stating plainly: `aliases` is for one canonical
+# name whose raw address changes over time -- it is NOT a way to give one
+# physical device two simultaneously-live playlist entries. If you
+# migrate a device to a new transport (e.g. claimed years ago as a plain
+# `transport = "bluetooth"` entry via Windows discovery, later given a
+# real `ble-gatt` entry once a meterkast-proxy board could read it),
+# DELETE the old entry -- don't leave both around. Two names both
+# claiming the same live raw address is a genuine ambiguity to the
+# resolver, not a harmless duplicate: it shows up as
+# `resolveCandidates(...) -> {status: 'ambiguous'}`, and
+# ble-gatt-proxy-adapter.js correctly refuses to guess which one it is,
+# logs a warning, and skips resolving *either* entry every cycle. This
+# bit a real playlist on this exact project: three old, unused
+# `bluetooth`-transport leftovers (never read by any polling adapter,
+# just historical discovery claims) each shared a MAC with a real,
+# actively-polled `ble-gatt` entry, and the moment the alias resolver
+# started cross-checking every transport against one shared index, the
+# real entries silently stopped getting new readings until the stale
+# ones were deleted. See README.md "Extending to time-scoped device
+# aliases" for the full ambiguous/ownership distinction.
