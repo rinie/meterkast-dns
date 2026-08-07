@@ -106,6 +106,14 @@ isn't near the device you're after, or alongside the Windows-native scans
 for a second vantage point. Also fails clearly if `METERKAST_PROXY_HOSTS`
 isn't set.
 
+Optionally narrow by signal strength: enter a minimum RSSI (e.g. `-67`
+for "NEAR or closer") and the proxy board itself drops anything weaker
+before sending results back -- leave it blank to see every device the
+board currently sees, the previous behavior. `proximity` is the same
+coarse RSSI-bucketed label the board computes (`FAR`/`TOO FAR`/`NEAR`/
+`CLOSE`/`VERY CLOSE`) -- not a distance estimate, just a human-readable
+version of the raw `rssi` shown next to it.
+
 ```datatable
-{"discover": true, "endpoint": "/discover/bluetooth-proxy", "buttonLabel": "Scan Bluetooth (via proxy)", "columns": ["suggestedName", "address"]}
+{"discover": true, "endpoint": "/discover/bluetooth-proxy", "buttonLabel": "Scan Bluetooth (via proxy)", "minRssiInput": true, "columns": ["suggestedName", "address", "meta.rssi", "meta.proximity"], "header": {"meta.rssi": "RSSI", "meta.proximity": "Proximity"}}
 ```

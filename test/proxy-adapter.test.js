@@ -56,6 +56,34 @@ test("discoverBleViaProxies fetches a real local proxy's /scan/ble and keeps res
   }
 });
 
+test("discoverBleViaProxies passes minRssi through as /scan/ble's own query param when given", async () => {
+  const bleFixture = await loadBleFixture();
+  const server = await startFakeProxyServer({ "/scan/ble?minRssi=-67": bleFixture });
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const results = await discoverBleViaProxies([baseUrl], -67);
+    assert.deepEqual(results, { [baseUrl]: bleFixture });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("discoverBleViaProxies omits the query string entirely when minRssi isn't given -- unfiltered, previous behavior", async () => {
+  const bleFixture = await loadBleFixture();
+  const server = await startFakeProxyServer({ "/scan/ble": bleFixture });
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const results = await discoverBleViaProxies([baseUrl]);
+    assert.deepEqual(results, { [baseUrl]: bleFixture });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("discoverBleViaProxies isolates an unreachable proxy -- one offline board doesn't fail the others", async () => {
   const bleFixture = await loadBleFixture();
   const server = await startFakeProxyServer({ "/scan/ble": bleFixture });
@@ -87,7 +115,14 @@ test("unclaimedProxyBleDevices uppercases the address, excludes an already-claim
       transport: "bluetooth",
       address: "11:22:33:44:55:66".toUpperCase(),
       suggestedName: "bluetooth-112233445566",
-      meta: { name: undefined, rssi: -80, ageMs: 30500, sourceProxy: "http://proxy-a", serviceDataUuidCounts: undefined },
+      meta: {
+        name: undefined,
+        rssi: -80,
+        proximity: "TOO FAR",
+        ageMs: 30500,
+        sourceProxy: "http://proxy-a",
+        serviceDataUuidCounts: undefined,
+      },
     },
   ]);
 });
@@ -102,6 +137,20 @@ test("unclaimedProxyBleDevices excludes a device matching a bleIgnore prefix", a
     candidates.map((c) => c.address),
     ["AA:BB:CC:DD:EE:FF"],
   );
+});
+
+test("unclaimedProxyBleDevices passes through the proxy's own proximity label, undefined on older firmware without it", async () => {
+  const rawByProxy = {
+    "http://proxy-a": [
+      { address: "aa:aa:aa:aa:aa:aa", rssi: -35, proximity: "VERY CLOSE", ageMs: 100 },
+      { address: "bb:bb:bb:bb:bb:bb", rssi: -90, ageMs: 100 }, // no proximity field at all -- pre-upgrade firmware
+    ],
+  };
+
+  const candidates = unclaimedProxyBleDevices(rawByProxy, {});
+
+  assert.equal(candidates.find((c) => c.address === "AA:AA:AA:AA:AA:AA").meta.proximity, "VERY CLOSE");
+  assert.equal(candidates.find((c) => c.address === "BB:BB:BB:BB:BB:BB").meta.proximity, undefined);
 });
 
 test("unclaimedProxyBleDevices suggests a slugified name when the device advertised one", async () => {

@@ -199,11 +199,18 @@ const discover = {
   // (all three candidates carry transport: "bluetooth") -- real MAC
   // addresses from the proxy's own NimBLE scan, same as the Windows-native
   // paths, unlike WebBluetooth's deliberately opaque device.id.
-  "bluetooth-proxy": async () => {
+  // ?minRssi= (e.g. ?minRssi=-67 for "NEAR or closer") is forwarded
+  // straight through to each proxy's own /scan/ble -- the board itself
+  // does the filtering (see meterkast-proxy's ble_scanner.h), this side
+  // just passes the floor along. Omitted query param -> undefined ->
+  // discoverBleViaProxies sends no query string at all, same unfiltered
+  // behavior as before this existed.
+  "bluetooth-proxy": async (query) => {
     if (proxyUrls.length === 0) {
       throw new Error("Proxy BLE discovery needs METERKAST_PROXY_HOSTS set in .env (see README.md)");
     }
-    const rawByProxy = await discoverBleViaProxies(proxyUrls);
+    const minRssi = query.get("minRssi");
+    const rawByProxy = await discoverBleViaProxies(proxyUrls, minRssi === null ? undefined : Number(minRssi));
     return unclaimedProxyBleDevices(rawByProxy, recordsAsObject(registry), bleIgnore);
   },
 };
