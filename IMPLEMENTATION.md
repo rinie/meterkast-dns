@@ -1780,6 +1780,38 @@ verification time, the identical environmental gap noted in the previous
 entry, not a regression from this change. `node --test test/run-all.js`:
 242 pass, 1 pre-existing skip, 0 failing.
 
+**RSSI-floor discovery filtering, wired up on the meterkast-dns side to
+match a real feature a separate session added to `meterkast-proxy`
+itself.** That project's own `feature/ble-proximity` branch (merged
+there, `87e777e`) added a `proximity` label and an optional `?minRssi=`
+query param to `GET /scan/ble` -- discovered by checking that repo's own
+recent commits directly (`git log --all`) after being asked to look at
+it, since the work happened in a different Claude Code session against a
+different repo, not this conversation. `discoverBleViaProxies` now takes
+an optional `minRssi` and forwards it as that same query param when
+given (`src/adapters/proxy-adapter.js`), `unclaimedProxyBleDevices`
+passes the proxy's own `proximity` label through into each candidate's
+`meta`, and `bin/meterkastd.js`'s `"bluetooth-proxy"` discover function
+reads `?minRssi=` off the incoming request and threads it through --
+`server.js`'s existing `handleDiscover(query)` plumbing (already used by
+DNS's own `?cidr=`) needed no changes at all. `public/screens.js` grew a
+second optional input type, `minRssiInput` (alongside the existing
+`cidrInput`), genuinely optional unlike a blank CIDR -- an empty box
+just means "unfiltered," never a blocked scan.
+
+Live-verified against this machine's own two real `meterkast-proxy`
+boards, both reachable at verification time: `POST
+/discover/bluetooth-proxy` unfiltered returned 10 real candidates;
+`POST /discover/bluetooth-proxy?minRssi=-67` against the same live
+scan correctly narrowed to 3, every one of them genuinely `NEAR` or
+`VERY CLOSE` per the proxy's own bucketing, none `TOO FAR`/`FAR`
+leaking through. The browser-side wiring was checked directly rather
+than assumed: a temporary `window.fetch` monkey-patch confirmed
+`public/screens.js`'s click handler actually builds
+`/discover/bluetooth-proxy?minRssi=-67` from the number input's real
+value before the real end-to-end curl check above. `node --test
+test/run-all.js`: 245 pass, 1 pre-existing skip, 0 failing.
+
 ## Testing
 
 `node:test` (built into Node, no test framework dependency), run via

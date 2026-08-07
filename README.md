@@ -551,6 +551,31 @@ device-specific knowledge off the firmware: a household's own "ignore
 this neighbor's device" preference is exactly that, a per-installation
 preference, not something worth reflashing a board over.
 
+**RSSI-floor filtering for `/screens/discover`'s "Bluetooth (via proxy)"
+panel — a second, complementary way to cut discovery noise, this one
+per-scan rather than a standing playlist rule.** A dense apartment
+building's passive BLE scan can turn up dozens of real, distant devices
+that aren't ever going to be claimed — a neighbor's whole smart home,
+several floors of Find My/Fast Pair beacons — where `bleIgnore`'s
+per-address/per-UUID entries don't scale (there's no one address or UUID
+to blacklist; it's everything weak). `meterkast-proxy` itself now buckets
+each device's `rssi` into a coarse `proximity` label (`FAR`/`TOO FAR`/
+`NEAR`/`CLOSE`/`VERY CLOSE` — not a distance estimate, RSSI isn't one,
+just a human-readable grouping of the same raw number) and accepts an
+optional `?minRssi=` on its own `GET /scan/ble` (see the separate
+`meterkast-proxy` repo's own README) that drops anything weaker *before*
+sending results back — the filtering happens on the board, not here.
+`discoverBleViaProxies(proxyUrls, minRssi)` (`src/adapters/
+proxy-adapter.js`) forwards the floor straight through when the Discover
+screen's own optional number input is filled in (e.g. `-67` for "NEAR or
+closer"); left blank, no query string is sent at all, the same
+unfiltered behavior as before this existed. `unclaimedProxyBleDevices`
+passes the proxy's own `proximity` label straight through into each
+candidate's `meta`, shown as its own column next to `rssi` on the
+Discover screen — `undefined` on an older proxy firmware that predates
+the field, same graceful-fallback shape every other optional `meta`
+field in this project already has.
+
 **Deferred, not built here**: a Medisana-style BLE scale's real protocol
 (write a trigger byte, subscribe to a GATT indication, wait for the
 device's own asynchronous notify) — a strict superset of the read-only

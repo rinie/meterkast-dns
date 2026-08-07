@@ -83,8 +83,17 @@ async function fetchFromProxy(baseUrl, path, label) {
 // {proxyUrl: rawDevices[]} -- kept per-proxy (not flattened yet) so
 // unclaimedProxyBleDevices can tag each candidate with where it actually
 // came from.
-export async function discoverBleViaProxies(proxyUrls) {
-  const results = await Promise.all(proxyUrls.map((url) => fetchFromProxy(url, "/scan/ble", "BLE")));
+//
+// minRssi, when given, is passed straight through as /scan/ble's own
+// ?minRssi= query param (see meterkast-proxy's ble_scanner.h) -- the
+// filtering happens on the board itself, not here; this side just
+// forwards the floor rather than fetching everything and re-filtering
+// client-side, since the proxy already does exactly this filtering for
+// free. Omitted (undefined) means no query string at all, the same
+// unfiltered behavior as before this existed.
+export async function discoverBleViaProxies(proxyUrls, minRssi) {
+  const path = minRssi === undefined ? "/scan/ble" : `/scan/ble?minRssi=${encodeURIComponent(minRssi)}`;
+  const results = await Promise.all(proxyUrls.map((url) => fetchFromProxy(url, path, "BLE")));
   return Object.fromEntries(proxyUrls.map((url, i) => [url, results[i]]));
 }
 
@@ -138,7 +147,20 @@ export function unclaimedProxyBleDevices(rawDevicesByProxy, configuredRecords, i
         transport: "bluetooth",
         address,
         suggestedName: device.name ? slugify(device.name) : `bluetooth-${address.replace(/:/g, "")}`,
-        meta: { name: device.name, rssi: device.rssi, ageMs: device.ageMs, sourceProxy: proxyUrl, serviceDataUuidCounts },
+        meta: {
+          name: device.name,
+          rssi: device.rssi,
+          // Coarse RSSI-bucketed label the proxy itself computes (see
+          // ble_scanner.h's proximityLabel) -- not a distance estimate,
+          // just a human-readable grouping of the same rssi already
+          // here. Passed through as-is, same as every other raw field
+          // in this object; undefined on an older proxy firmware that
+          // predates this field.
+          proximity: device.proximity,
+          ageMs: device.ageMs,
+          sourceProxy: proxyUrl,
+          serviceDataUuidCounts,
+        },
       });
     }
   }

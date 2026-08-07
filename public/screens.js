@@ -258,6 +258,13 @@ function startAddToPlaylist(row, cellEl) {
 // box, but only one of them says so. No default resolved (or the fetch
 // fails) just leaves the placeholder as before this existed; this is a
 // convenience, never a requirement.
+//
+// `minRssiInput: true` (Bluetooth via proxy) renders a number input that
+// appends `minRssi=` when filled -- unlike cidrInput, this one is
+// genuinely optional: a meterkast-proxy board's own /scan/ble already
+// works with no filtering at all (see server.js/bin/meterkastd.js), an
+// empty box just means "show everything," never a blocked scan the way
+// a blank CIDR is.
 function mountDiscoverGrid(el, config) {
   let cidrInputEl;
   if (config.cidrInput) {
@@ -279,6 +286,14 @@ function mountDiscoverGrid(el, config) {
         })
         .catch(() => {}); // no configured default, or a transient failure -- the placeholder hint still works
     }
+  }
+  let minRssiInputEl;
+  if (config.minRssiInput) {
+    minRssiInputEl = document.createElement("input");
+    minRssiInputEl.type = "number";
+    minRssiInputEl.placeholder = config.minRssiPlaceholder ?? "minRssi, e.g. -67 (optional)";
+    minRssiInputEl.className = "add-to-playlist-name";
+    el.append(minRssiInputEl);
   }
   const button = document.createElement("button");
   button.type = "button";
@@ -303,9 +318,11 @@ function mountDiscoverGrid(el, config) {
     const originalLabel = button.textContent;
     button.textContent = "Scanning...";
     try {
-      const endpoint = cidrInputEl
-        ? `${config.endpoint}?cidr=${encodeURIComponent(cidrInputEl.value.trim())}`
-        : config.endpoint;
+      const params = new URLSearchParams();
+      if (cidrInputEl) params.set("cidr", cidrInputEl.value.trim());
+      if (minRssiInputEl?.value.trim()) params.set("minRssi", minRssiInputEl.value.trim());
+      const query = params.toString();
+      const endpoint = query ? `${config.endpoint}?${query}` : config.endpoint;
       const res = await fetch(endpoint, { method: "POST" });
       const rows = await res.json();
       if (!res.ok) {
